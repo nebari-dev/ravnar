@@ -1,0 +1,162 @@
+name: docker
+
+on:
+  pull_request:
+    paths:
+      - ".github/**"
+      - "src/**"
+      - ".dockerignore"
+      - ".gitignore"
+      - "config-docker.yml"
+      - "Dockerfile"
+      - "pyproject.toml"
+      - "uv.lock"
+  push:
+    branches: ["main"]
+    tags: ['v[0-9]+\.[0-9]+\.[0-9]+']
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  IMAGE: ghcr.io/openteams-ai/ravnar
+
+jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    outputs:
+      workflow-type: ${{ steps.workflow.outputs.type }}
+      version: ${{ steps.workflow.outputs.version-raw }}
+      tags: ${{ steps.image.outputs.tags }}
+      tag: ${{ fromJson(steps.image.outputs.json).tags[0] }}
+      labels: ${{ steps.image.outputs.labels }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Compute workflow metadata
+        id: workflow
+        uses: ./.github/actions/workflow-metadata
+
+      - name: Compute tag
+        id: tag
+        run: |
+          TAG=$(echo '${{ steps.workflow.outputs.version-raw }}' | sed 's/+/-/g')
+          echo "tag=${TAG}" | tee --append "${GITHUB_OUTPUT}"
+
+      - name: Setup image metadata
+        id: image
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=pr-${{ github.event.number }},enable=${{ steps.workflow.outputs.type == 'PR' }}
+            type=raw,value=pr-${{ github.event.number }}-${{ steps.tag.outputs.tag }},enable=${{ steps.workflow.outputs.type == 'PR' }}
+            type=raw,value=main,enable=${{ steps.workflow.outputs.type == 'main' }}
+            type=raw,value=latest,enable=${{ steps.workflow.outputs.type == 'release' }}
+            type=raw,value=${{ steps.tag.outputs.tag }},enable=${{ steps.workflow.outputs.type == 'release' }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            io.github.event.name=${{ github.event_name }}
+            io.github.event.pull-request.number=${{ github.event.number }}
+
+  build-and-push:
+    needs: metadata
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Generate cache entries
+        id: cache
+        shell: bash
+        run: |
+          MAIN_TAG="main-buildcache"
+
+          case '${{ needs.metadata.outputs.workflow-type }}' in
+            PR)
+              PR_TAG="pr-${{ github.event.number }}-buildcache"
+              
+              FROM_TAGS=("${PR_TAG}" "${MAIN_TAG}")
+              TO_TAGS=("${PR_TAG}")
+              ;;
+            main)
+              FROM_TAGS=("${MAIN_TAG}")
+              TO_TAGS=("${MAIN_TAG}")
+              ;;
+            release)
+              FROM_TAGS=("${MAIN_TAG}")
+              TO_TAGS=()
+              ;;
+            *)
+              echo "unknown build type '${{ needs.metadata.outputs.workflow-type  }}'" >&2
+              exit 1
+              ;;
+          esac
+
+          FROM_JSON=$(jq --null-input --compact-output \
+            --arg prefix 'type=registry,ref=${{ env.IMAGE }}:' \
+            --args \
+            '$ARGS.positional | map($prefix + .)' \
+            -- "${FROM_TAGS[@]}" \
+          )
+          echo "from-json=${FROM_JSON}" | tee --append "${GITHUB_OUTPUT}"
+
+          TO_JSON=$(jq --null-input --compact-output \
+            --arg prefix 'type=registry,ref=${{ env.IMAGE }}:' \
+            --arg postfix ',mode=max' \
+            --args \
+            '$ARGS.positional | map($prefix + . + $postfix)' \
+            -- "${TO_TAGS[@]}" \
+          )
+          echo "to-json=${TO_JSON}" | tee --append "${GITHUB_OUTPUT}"
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          build-args: |
+            VERSION=${{ needs.metadata.outputs.version }}
+          platforms: "linux/amd64,linux/arm64"
+          tags: ${{ needs.metadata.outputs.tags }}
+          labels: ${{ needs.metadata.outputs.labels }}
+          push: true
+          cache-from: ${{ join(fromJson(steps.cache.outputs.from-json), '\n') }}
+          cache-to: ${{ join(fromJson(steps.cache.outputs.to-json), '\n') }}
+
+  smoke-test:
+    needs:
+      - metadata
+      - build-and-push
+    if: ${{ github.event_name == 'pull_request' }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+        platform:
+          - linux/amd64
+          - linux/arm64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Run smoke test
+        run: docker run --platform ${{ matrix.platform }} ${{ needs.metadata.outputs.tag }} --version

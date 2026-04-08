@@ -1,0 +1,221 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Values for ravnar helm chart",
+  "type": "object",
+  "properties": {
+    "nameOverride": {
+      "type": "string"
+    },
+    "fullnameOverride": {
+      "type": "string"
+    },
+    "replicaCount": {
+      "type": "integer"
+    },
+    "config": {
+      "type": "object",
+      "properties": {
+        "inline": {
+          "type": "object"
+        },
+        "existingConfigMap": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "image": {
+      "$ref": "#/$defs/image"
+    },
+    "securityContext": {
+      "$ref": "#/$defs/securityContext"
+    },
+    "resources": {
+      "$ref": "#/$defs/resources"
+    },
+    "extraEnv": {
+      "$ref": "#/$defs/envMap"
+    },
+    "service": {
+      "$ref": "#/$defs/service"
+    },
+    "ingress": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["traefik", "kubernetes"]
+        },
+        "className": {
+          "type": "string"
+        },
+        "hostname": {
+          "type": "string"
+        }
+      }
+    },
+    "persistentFileStorage": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "storage": {
+          "type": "string"
+        }
+      }
+    },
+    "postgres": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "image": {
+          "$ref": "#/$defs/image"
+        },
+        "securityContext": {
+          "$ref": "#/$defs/securityContext"
+        },
+        "resources": {
+          "$ref": "#/$defs/resources"
+        },
+        "storage": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "image": {
+      "type": "object",
+      "properties": {
+        "repository": {
+          "type": "string"
+        },
+        "tag": {
+          "type": "string"
+        },
+        "pullPolicy": {
+          "type": "string",
+          "enum": ["Always", "IfNotPresent", "Never"]
+        }
+      }
+    },
+    "securityContext": {
+      "type": "object",
+      "properties": {
+        "pod": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "container": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "cpuString": {
+      "type": "string",
+      "description": "CPU value in Kubernetes format (e.g., '100m', '0.5', '1').",
+      "pattern": "^([0-9]+m?|[0-9]+(\\.[0-9]+)?)$"
+    },
+    "memoryString": {
+      "type": "string",
+      "description": "Memory value in Kubernetes format (e.g., '128Mi', '1Gi').",
+      "pattern": "^[0-9]+[EPTGMK]i?$"
+    },
+    "resources": {
+      "type": "object",
+      "properties": {
+        "requests": {
+          "type": "object",
+          "properties": {
+            "cpu": {
+              "$ref": "#/$defs/cpuString"
+            },
+            "memory": {
+              "$ref": "#/$defs/memoryString"
+            }
+          },
+          "additionalProperties": false
+        },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "cpu": {
+              "$ref": "#/$defs/cpuString"
+            },
+            "memory": {
+              "$ref": "#/$defs/memoryString"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "envMap": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          },
+          "valueFrom": {
+            "type": "object",
+            "properties": {
+              "secretKeyRef": {
+                "type": "object",
+                "required": ["name", "key"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "key": { "type": "string" },
+                  "optional": { "type": "boolean" }
+                }
+              },
+              "configMapKeyRef": {
+                "type": "object",
+                "required": ["name", "key"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "key": { "type": "string" },
+                  "optional": { "type": "boolean" }
+                }
+              },
+              "fieldRef": { "type": "object" },
+              "resourceFieldRef": { "type": "object" }
+            }
+          }
+        },
+        "oneOf": [{ "required": ["value"] }, { "required": ["valueFrom"] }],
+        "errorMessage": "Each entry must have either a 'value' or a 'valueFrom' field."
+      }
+    },
+    "service": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer"
+        },
+        "targetPort": {
+          "type": "integer"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{{- $component := "ravnar" }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ravnar.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ravnar.labels" (dict "top" . "component" $component) | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "ravnar.selectorLabels" (dict "top" . "component" $component) | nindent 4 }}
+  ports:
+    - protocol: TCP
+      port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.targetPort }}

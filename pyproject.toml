@@ -1,0 +1,232 @@
+[project]
+name = "ravnar"
+description = "Fully-fledged, pluggable AG-UI server"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [
+    { name = "OpenTeams", email = "info@openteams.com" },
+]
+readme = "README.md"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+requires-python = ">=3.11,<3.15"
+dependencies = [
+    # hard-pinned due to breaking changes on patch releases
+    "ag-ui-protocol==0.1.15",
+    "fastapi",
+    "fastsse==0.0.2",
+    "jinja2",
+    "jsonpatch>=1.33,<2",
+    "l2sl>=0.4,<0.5",
+    "opentelemetry-api>=1.39.0",
+    "opentelemetry-exporter-otlp>=1.39.0",
+    "opentelemetry-instrumentation-fastapi>=0.60b0",
+    "opentelemetry-instrumentation-sqlalchemy>=0.60b0",
+    "opentelemetry-sdk>=1.39.0",
+    "pydantic>=2.11",
+    "pydantic-core",
+    "pydantic-settings[yaml]>=2.13",
+    "python-multipart",
+    "sqlalchemy[asyncio]>=2",
+    "starlette",
+    "structlog>=25.4.0",
+    "typer",
+    "universal_pathlib>=0.3.4",
+]
+dynamic = ["version"]
+
+[project.optional-dependencies]
+serve = [
+    "psycopg[binary,pool]>=3.2.9,<4",
+    "uvicorn",
+    "uvloop; sys_platform != 'win32'",
+]
+pydantic-ai = [
+    # FIXME: find the lowest version for AG-UI
+    "pydantic-ai-slim[ag-ui]>=1.60,<2",
+]
+agno = [
+    # FIXME: find the lowest version for AG-UI
+    "agno>=2.5.2,<3",
+]
+sse = [
+    "httpx-sse>=0.4.0,<0.5",
+]
+oidc = [
+    "httpx>=0.28",
+    "pyjwt>=2,<3",
+]
+all = [
+    "ravnar[serve,pydantic-ai,agno,sse,oidc]"
+]
+
+[project.urls]
+Repository = "https://github.com/openteams-ai/ravnar"
+
+[project.scripts]
+ravnar = "ravnar.__main__:app"
+
+[dependency-groups]
+lint = [
+    "ravnar[all]",
+    "mypy==1.17.*",
+    "pre-commit>=4.2,<5",
+]
+test = [
+    "compyre>=0.2.0",
+    "httpx",
+    "pytest>=9",
+    "pytest-asyncio>=1.3.0",
+    "pytest-cases>=3.10.1",
+    "pytest-mock>=3.14.0,<4",
+]
+docs = [
+    "markupsafe",
+    "mdx-truly-sane-lists>=1.3",
+    "mkdocs>=1.6.1",
+    "mkdocs-gen-files>=0.5.0",
+    "mkdocs-jupyter>=0.25.1",
+    "mkdocs-macros-plugin>=1.3.9",
+    "mkdocs-material>=9.6.20",
+    "mkdocstrings[python]>=0.30.0",
+    "pygments",
+]
+dev = [
+    "hatch",
+    "ravnar[all]",
+    "uv-dynamic-versioning",
+    {include-group = "lint"},
+    {include-group = "test"},
+    {include-group = "docs"},
+]
+
+[build-system]
+requires = ["hatchling", "uv-dynamic-versioning"]
+build-backend = "hatchling.build"
+
+[[tool.uv.cache-keys]]
+file = "pyproject.toml"
+
+[[tool.uv.cache-keys]]
+git = { commit = true, tags = true }
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src",
+]
+
+[tool.hatch.build.targets.wheel]
+only-include = ["src"]
+sources = ["src"]
+
+[tool.hatch.version]
+source = "uv-dynamic-versioning"
+
+[tool.uv-dynamic-versioning]
+vcs = "git"
+style = "pep440"
+bump = true
+#strict = true
+ignore_untracked = true
+
+[tool.hatch.build.hooks.version]
+path = "src/_ravnar/version.py"
+template = '''
+__version__ = "{version}"
+'''
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+pydocstyle = { convention = "google" }
+select = [
+    "E",
+    "F",
+    "I001",
+    "B",
+    "C4",
+    "ISC",
+    "RET",
+    "SIM",
+    "PTH",
+    "D2",
+    "UP",
+    "ASYNC",
+    "RUF",
+]
+ignore = [
+    # Conflicts with ruff formatter
+    "ISC001",
+    # Ignore line too long, because due to ruff, the error can only occur for strings
+    "E501",
+    # cache has its purpose
+    "B019",
+    # built-in open() is well understood
+    "PTH123",
+    # mutually-exclusive with D211
+    "D203",
+    # mutually-exclusive with D212
+    "D213",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# blocking open in async tests is not an issue
+"tests/**/*.py" = ["ASYNC230"]
+# ruff and mypy disagree whether SQLAlchemy dunder fields should be annotated as ClassVar
+"src/_ravnar/orm.py" = ["RUF012"]
+# The examples and tutorials need to have a good the narrative rather than follow our code-style rules
+"docs/tutorials/*.py" = ["E402"]
+
+[tool.pytest]
+minversion = "9.0"
+addopts = ["-ra", "--tb=short"]
+testpaths = ["tests"]
+filterwarnings = [
+    "error",
+    "ignore::ResourceWarning",
+    "ignore:You should use `.*?` instead. Deprecated since version 1.39.0:DeprecationWarning",
+]
+xfail_strict = true
+asyncio_mode = "auto"
+
+[tool.mypy]
+files = "src"
+
+show_error_codes = true
+pretty = true
+
+disallow_untyped_calls = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+allow_redefinition = true
+no_implicit_optional = true
+
+warn_redundant_casts = true
+warn_unused_ignores = true
+
+warn_return_any = true
+warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = [
+    "jsonpatch",
+]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# It is a fundamental feature of ravnar to allow users to define methods on the pluggable
+# components as sync or async. Unfortunately, this cannot be expressed through static types.
+module = [
+    "_ravnar.authenticators",
+]
+disable_error_code = [
+    "override",
+]

@@ -1,0 +1,17 @@
+{{- if .Values.postgres.enabled -}}
+{{- $component := "postgres" }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ravnar.component-name" (dict "top" . "component" $component) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ravnar.labels" (dict "top" . "component" $component) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "ravnar.selectorLabels" (dict "top" . "component" $component) | nindent 4 }}
+  ports:
+    - port: 5432
+      targetPort: 5432
+{{- end -}}

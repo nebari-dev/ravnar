@@ -1,0 +1,59 @@
+site_name: ravnar
+
+watch:
+  - src
+  - scripts/docs
+
+theme:
+  name: material
+  features:
+    - content.tabs.link
+    - content.code.copy
+    - search.suggest
+
+plugins:
+  - search
+  - macros:
+      module_name: scripts/docs/macros
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            show_source: false
+            show_root_heading: true
+            show_bases: false
+            unwrap_annotated: true
+          inventories:
+            - https://docs.python.org/3/objects.inv
+            - https://docs.pydantic.dev/latest/objects.inv
+            - https://ai.pydantic.dev/objects.inv
+  - gen-files:
+      scripts:
+        - scripts/docs/gen_files.py
+  - mkdocs-jupyter:
+      execute: true
+      include_source: True
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.superfences
+  - codehilite
+  - mdx_truly_sane_lists
+
+nav:
+  - index.md
+  - Architecture: architecture.md
+  - Deployment: deploy.md
+  - Tutorials:
+      - Authentication: tutorials/authentication.py
+  - References:
+      - Configuration: references/config.md
+      - Python API: references/python_api.md
+      - REST API: references/rest_api.md
+      - CLI: references/cli.md
+      - Helm chart: references/helm-chart.md

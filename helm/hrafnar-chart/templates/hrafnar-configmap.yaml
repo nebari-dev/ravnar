@@ -1,0 +1,13 @@
+{{- if not .Values.config.existingConfigMap.name -}}
+{{- $component := "ravnar" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "ravnar.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ravnar.labels" (dict "top" . "component" $component) | nindent 4 }}
+data:
+  config.yaml: |
+    {{- toYaml .Values.config.inline | nindent 4 }}
+{{- end -}}

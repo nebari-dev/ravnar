@@ -1,0 +1,31 @@
+name: docker
+
+on:
+  pull_request:
+    types:
+      - closed
+
+env:
+  IMAGE: ghcr.io/openteams-ai/ravnar
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install Skopeo and jq
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes skopeo jq
+
+      - name: Delete PR image tags
+        run: |
+          PR_NUMBER=${{ github.event.number }}
+          TAGS=$(skopeo list-tags docker://${{ env.IMAGE }} | jq --raw-output ".Tags[] | select(. | startswith(\"pr-${PR_NUMBER}-\"))" || true)
+
+          if [[ -z "${TAGS}" ]]; then
+            echo "No tags found for PR #${PR_NUMBER}"
+            exit 0
+          fi
+
+          echo "${TAGS}" | xargs -t -I '{tag}' skopeo delete 'docker://${{ env.IMAGE }}:{tag}'

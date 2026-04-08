@@ -1,0 +1,32 @@
+name: patch-helm-chart
+description: "Patch helm chart"
+
+inputs:
+  chart-version:
+    description: Chart version
+    default: 0.0.0
+  app-version:
+    description: App version
+    default: 0.0.0
+
+runs:
+  using: composite
+
+  steps:
+    - name: Install mise and setup dasel
+      uses: jdx/mise-action@v3
+      with:
+        mise_toml: |
+          [tools]
+          dasel = "3"
+
+    - name: Inject versions into helm chart
+      shell: bash
+      run: |
+        CONTENT=$(dasel --out=yaml \
+          --var="chart=yaml:file:./helm/ravnar-chart/Chart.yaml" \
+          --var="chartVersion='${{ inputs.chart-version }}'" \
+          --var="appVersion='${{ inputs.app-version }}'" \
+          '{$chart..., "version": $chartVersion, "appVersion": $appVersion}' \
+        )
+        echo "${CONTENT}" | tee ${FILE}

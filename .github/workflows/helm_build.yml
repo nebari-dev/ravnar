@@ -1,0 +1,62 @@
+name: helm
+
+on:
+  pull_request:
+    paths:
+      - ".github/**"
+      - "helm/**"
+  push:
+    tags: ['chart/v[0-9]+\.[0-9]+\.[0-9]+']
+
+concurrency:
+  group: helm-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  NAMESPACE: ghcr.io/openteams-ai
+
+jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    outputs:
+      workflow-type: ${{ steps.workflow.outputs.type }}
+      chart-version: ${{ steps.workflow.outputs.version-chart }}
+      app-version: ${{ steps.workflow.outputs.version-latest }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Compute workflow metadata
+        id: workflow
+        uses: ./.github/actions/workflow-metadata
+
+  build-and-push:
+    needs: metadata
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up helm
+        uses: azure/setup-helm@v4
+
+      - name: Patch helm chart
+        uses: ./.github/actions/patch-helm-chart
+        with:
+          chart-version: ${{ needs.metadata.outputs.chart-version }}
+          app-version: ${{ needs.metadata.outputs.app-version }}
+
+      - name: Install chart dependencies
+        run: helm dependencies update ./helm/ravnar-chart
+
+      - name: Package helm chart
+        run: helm package ./helm/ravnar-chart
+
+      - name: Push helm chart
+        if: ${{ needs.metadata.outputs.workflow-type == 'release' }}
+        run: helm push 'ravnar-chart-${{ needs.metadata.outputs.chart-version }}.tgz' 'oci://${{ env.NAMESPACE }}'

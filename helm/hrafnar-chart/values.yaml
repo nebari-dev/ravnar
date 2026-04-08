@@ -1,0 +1,104 @@
+# -- String to override the default name of the chart deployment
+nameOverride: ""
+# -- String to override the default full name of the chart deployment
+fullnameOverride: ""
+
+# -- Number of replicas for the main application pod
+replicaCount: 1
+
+image:
+  # -- The repository of the main application image
+  repository: ghcr.io/openteams-ai/ravnar
+  # -- The tag of the main application image. If not set, the chart's appVersion is used.
+  tag: ""
+  # -- The pull policy for the main application image
+  pullPolicy: IfNotPresent
+
+securityContext:
+  pod:
+    # -- The user ID to run the pod with
+    runAsUser: 1000
+    # -- The group ID to run the pod with
+    runAsGroup: 1000
+    # -- The group ID for the pod's filesystem
+    fsGroup: 1000
+  container:
+    # -- Whether to run the container with a read-only root filesystem
+    readOnlyRootFilesystem: true
+
+resources:
+  # -- Resource limits for the main application container
+  limits:
+    # -- CPU limit for the main application container
+    cpu: 500m
+    # -- Memory limit for the main application container
+    memory: 512Mi
+  # -- Resource requests for the main application container
+  requests:
+    # -- CPU request for the main application container
+    cpu: 500m
+    # -- Memory request for the main application container
+    memory: 512Mi
+
+config:
+  # -- Inline configuration for the application
+  inline: {}
+  # -- Use an existing ConfigMap for configuration
+  existingConfigMap:
+    # -- The name of the existing ConfigMap
+    name: ""
+    # -- The key within the existing ConfigMap that contains the configuration
+    key: config.yaml
+
+# -- Extra environment variables for the application
+extraEnv: {}
+
+service:
+  # -- The type of service to create
+  type: ClusterIP
+  # -- The port that the service should expose
+  port: 80
+  # -- The target port on the container
+  targetPort: 8000
+
+ingress:
+  # -- Whether to enable the Ingress
+  enabled: false
+  # -- The kind of Ingress controller to use. Can be 'kubernetes' or 'traefik'
+  kind: kubernetes
+  # -- The Ingress class to use
+  className: nginx
+  # -- The hostname for the Ingress. Must be specified if ingress is enabled.
+  hostname: ""
+
+persistentFileStorage:
+  # -- Whether to enable persistent file storage
+  enabled: true
+  # -- The size of the persistent storage
+  storage: 8Gi
+
+postgres:
+  # -- Whether to enable the PostgreSQL dependency
+  enabled: true
+  image:
+    # -- The repository of the PostgreSQL image
+    repository: postgres
+    # -- The tag of the PostgreSQL image
+    tag: "16-alpine"
+    # -- The pull policy for the PostgreSQL image
+    pullPolicy: IfNotPresent
+  # -- Security context for the PostgreSQL pod and container
+  # FIXME: Define appropriate security context
+  securityContext:
+    pod: {}
+    container: {}
+  # -- Resource limits and requests for the PostgreSQL container
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+  # -- The size of the persistent storage for PostgreSQL
+  storage: 1Gi

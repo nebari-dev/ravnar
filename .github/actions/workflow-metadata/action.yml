@@ -1,0 +1,66 @@
+name: workflow-metadata
+description: "Compute workflow metadata"
+
+outputs:
+  type:
+    description: Workflow type. One of 'PR', 'main', or 'release'
+    value: ${{ steps.workflow.outputs.type }}
+  version-raw:
+    description: Raw version
+    value: ${{ steps.versions.outputs.raw }}
+  version-latest:
+    description: Latest version
+    value: ${{ steps.versions.outputs.latest }}
+  version-chart:
+    description: Latest chart version
+    value: ${{ steps.versions.outputs.chart }}
+
+runs:
+  using: composite
+
+  steps:
+    - name: Setup environment
+      uses: ./.github/actions/setup-env
+
+    - id: workflow
+      shell: bash
+      run: |
+        # Compute workflow type
+        case '${{ github.event_name }}' in
+          pull_request)
+            TYPE=PR
+            ;;
+          push)
+            case '${{ github.ref }}' in
+              refs/heads/main)
+                TYPE=main
+                ;;
+              refs/tags/*)
+                TYPE=release
+                ;;
+              *)
+              echo "unknown push ref '${{ github.ref }}'" >&2
+              exit 1
+              ;;
+            esac
+            ;;
+          *)
+            echo "unknown event name '${{ github.event_name }}'" >&2
+            exit 1
+            ;;
+        esac
+
+        echo "type=${TYPE}" | tee --append "${GITHUB_OUTPUT}"
+
+    - id: versions
+      shell: bash
+      run: |
+        # Compute versions
+        RAW=$(uv run hatch version)
+        echo "raw=${RAW}" | tee --append "${GITHUB_OUTPUT}"
+
+        LATEST=$(git describe --tags --match "v[0-9]*.[0-9]*.[0-9]*" --abbrev=0| sed 's|^v||')
+        echo "latest=${LATEST}" | tee --append "${GITHUB_OUTPUT}"
+
+        CHART=$(git describe --tags --match "chart/v[0-9]*.[0-9]*.[0-9]*" --abbrev=0| sed 's|^chart/v||')
+        echo "chart=${CHART}" | tee --append "${GITHUB_OUTPUT}"

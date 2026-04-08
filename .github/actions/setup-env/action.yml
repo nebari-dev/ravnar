@@ -1,0 +1,22 @@
+name: setup-env
+description: "Setup environment"
+
+inputs:
+  python-version:
+    default: "3.11"
+    description: Python version to install
+
+runs:
+  using: composite
+
+  steps:
+    - name: Install uv and set the python version
+      uses: astral-sh/setup-uv@v6
+      with:
+        python-version: ${{ inputs.python-version }}
+        enable-cache: true
+
+    - shell: bash
+      run: |
+        # Install project and requirements
+        uv sync --link-mode copy --locked

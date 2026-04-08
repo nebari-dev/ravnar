@@ -1,0 +1,68 @@
+{{- if .Values.postgres.enabled -}}
+{{- $component := "postgres" }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "ravnar.component-name" (dict "top" . "component" $component) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ravnar.labels" (dict "top" . "component" $component) | nindent 4 }}
+spec:
+  serviceName: {{ printf "%s-%s" .Release.Name $component }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "ravnar.selectorLabels" (dict "top" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ravnar.labels" (dict "top" . "component" $component) | nindent 8 }}
+    spec:
+      {{- with .Values.postgres.securityContext.pod }}
+      securityContext:
+        {{- . | toYaml | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ $component }}
+          image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+          imagePullPolicy: {{ .Values.postgres.image.pullPolicy }}
+          {{- with .Values.postgres.securityContext.container }}
+          securityContext:
+            {{- . | toYaml | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ravnar.component-name" (dict "top" . "component" $component) }}
+                  key: username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ravnar.component-name" (dict "top" . "component" $component) }}
+                  key: password
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ravnar.component-name" (dict "top" . "component" $component) }}
+                  key: database
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          ports:
+            - containerPort: 5432
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        annotations:
+          "helm.sh/resource-policy": "keep"
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        resources:
+          requests:
+            storage: {{ .Values.postgres.storage }}
+{{- end -}}

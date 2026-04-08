@@ -1,0 +1,117 @@
+{{- include "ravnar.validateValues" . -}}
+{{- $component := "ravnar" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ravnar.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ravnar.labels" (dict "top" . "component" $component) | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "ravnar.selectorLabels" (dict "top" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ravnar.labels" (dict "top" . "component" $component) | nindent 8 }}
+    spec:
+      {{- with .Values.securityContext.pod }}
+      securityContext:
+        {{- . | toYaml | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: ravnar
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.securityContext.container }}
+          securityContext:
+            {{- . | toYaml | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          env:
+            {{- $envMap := include "ravnar.recursiveTplJson" (dict "top" . "value" .Values.extraEnv) | fromJson -}}
+            {{- include "ravnar.env.checkAndSet" (dict
+              "envMap"  $envMap
+              "name"    "RAVNAR_CONFIG"
+              "value"   (dict "value" "/var/ravnar/helm/config.yaml")
+              "message" "Please use config.inline or config.existingConfigMap instead."
+            ) -}}
+            {{- include "ravnar.env.checkAndSet" (dict
+              "envMap"  $envMap
+              "name"    "RAVNAR_LOCAL_STORAGE"
+              "value"   (dict "value" "/var/ravnar/local_storage")
+              "message" ""
+            ) -}}
+            {{- if .Values.persistentFileStorage.enabled }}
+            {{- include "ravnar.env.checkAndSet" (dict
+              "envMap"  $envMap
+              "name"    "RAVNAR_STORAGE__FILE_STORAGE_PATH"
+              "value"   (dict "value" "/var/ravnar/files")
+              "message" "Set persistentFileStorage.enabled=false if you must override."
+            ) -}}
+            {{- end }}
+            {{- if .Values.postgres.enabled }}
+            {{- $message := "Set postgres.enabled=false if you must override." }}
+            {{- $secretName := include "ravnar.component-name" (dict "top" . "component" "postgres") }}
+            {{- range $secretKey := list "username" "password" "resource" }}
+            {{- $name := printf "POSTGRES_%s" (upper $secretKey) -}}
+            {{- include "ravnar.env.checkAndSet" (dict
+              "envMap"  $envMap
+              "name"    $name
+              "value"   (dict "valueFrom" (dict "secretKeyRef" (dict "name" $secretName "key" $secretKey)))
+              "message" $message
+            ) -}}
+            {{- end }}
+            {{- include "ravnar.env.checkAndSet" (dict
+              "envMap"  $envMap
+              "name"    "RAVNAR_STORAGE__DATABASE_DSN"
+              "value"   (dict "value" (printf "postgresql+psycopg://%s:%s@%s"
+                          (include "ravnar.env.templateLiteral" "POSTGRES_USERNAME")
+                          (include "ravnar.env.templateLiteral" "POSTGRES_PASSWORD")
+                          (include "ravnar.env.templateLiteral" "POSTGRES_RESOURCE")
+                        ))
+              "message" $message
+            ) -}}
+            {{- end }}
+            {{- include "ravnar.env.render" $envMap | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /var/ravnar/helm/config.yaml
+              subPath: {{ if .Values.config.existingConfigMap.name }}{{ .Values.config.existingConfigMap.key }}{{ else }}config.yaml{{ end }}
+              readOnly: true
+            - name: local-storage
+              mountPath: /var/ravnar/local_storage
+            {{- if .Values.persistentFileStorage.enabled }}
+            - name: persistent-file-storage
+              mountPath: /var/ravnar/files
+            {{- end }}
+          ports:
+            - containerPort: {{ .Values.service.targetPort }}
+          startupProbe:
+            httpGet:
+              port: {{ .Values.service.targetPort }}
+              path: /health
+            periodSeconds: 1
+            timeoutSeconds: 1
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              port: {{ .Values.service.targetPort }}
+              path: /health
+            periodSeconds: 10
+            timeoutSeconds: 1
+            failureThreshold: 3
+      volumes:
+        - name: config
+          configMap:
+            name: {{ if .Values.config.existingConfigMap.name }}{{ tpl .Values.config.existingConfigMap.name . }}{{ else }}{{ include "ravnar.fullname" . }}{{ end }}
+        - name: local-storage
+          emptyDir: {}
+        {{- if .Values.persistentFileStorage.enabled }}
+        - name: persistent-file-storage
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-persistent-file-storage
+        {{- end }}

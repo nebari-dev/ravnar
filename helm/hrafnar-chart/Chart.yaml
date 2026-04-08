@@ -1,0 +1,18 @@
+apiVersion: v2
+name: ravnar-chart
+type: application
+description: A batteries-included helm chart for ravnar, the fully-fledged, pluggable AG-UI server
+version: "set-by-cd"
+appVersion: "set-by-cd"
+keywords:
+  - ravnar
+  - backend
+  - AI
+  - http
+  - REST
+home: https://github.com/openteams-ai/ravnar
+sources:
+  - https://github.com/openteams-ai/ravnar
+maintainers:
+  - name: OpenTeams
+    email: info@openteams.com

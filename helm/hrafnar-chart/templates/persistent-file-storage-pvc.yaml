@@ -1,0 +1,16 @@
+{{- if .Values.persistentFileStorage.enabled }}
+{{- $component := "persistent-file-storage" }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "ravnar.component-name" (dict "top" . "component" $component) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ravnar.labels" (dict "top" . "component" $component) | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.persistentFileStorage.storage }}
+{{- end }}
