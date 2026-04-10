@@ -70,7 +70,7 @@ def helm_chart_reference():
         result = subprocess.run(
             [
                 "helm-docs",
-                "--chart-to-generate=helm/ravnar-chart",
+                "--chart-to-generate=helm/ravnar",
                 "--dry-run",
             ],
             capture_output=True,

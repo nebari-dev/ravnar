@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  NAMESPACE: ghcr.io/openteams-ai
+  NAMESPACE: quay.io/nebari/charts
 
 jobs:
   metadata:
@@ -52,11 +52,19 @@ jobs:
           app-version: ${{ needs.metadata.outputs.app-version }}
 
       - name: Install chart dependencies
-        run: helm dependencies update ./helm/ravnar-chart
+        run: helm dependencies update ./helm/ravnar
 
       - name: Package helm chart
-        run: helm package ./helm/ravnar-chart
+        run: helm package ./helm/ravnar
+
+      - name: Login to Quay.io
+        if: ${{ needs.metadata.outputs.workflow-type == 'release' }}
+        uses: docker/login-action@v3
+        with:
+          registry: quay.io
+          username: ${{ secrets.DOCKER_REGISTRY_USERNAME }}
+          password: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
 
       - name: Push helm chart
         if: ${{ needs.metadata.outputs.workflow-type == 'release' }}
-        run: helm push 'ravnar-chart-${{ needs.metadata.outputs.chart-version }}.tgz' 'oci://${{ env.NAMESPACE }}'
+        run: helm push 'ravnar-${{ needs.metadata.outputs.chart-version }}.tgz' 'oci://${{ env.NAMESPACE }}'

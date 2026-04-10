@@ -15,7 +15,7 @@ docker run \
     --name ravnar --rm --pull always \
     --env RAVNAR_SERVER__LOGGING__AS_JSON=false \
     --publish 8000:8000 \
-    ghcr.io/openteams-ai/ravnar:latest
+    quay.io/nebari/ravnar:latest
 ```
 
 ## What does the architecture look like?

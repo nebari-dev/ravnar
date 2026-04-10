@@ -5,7 +5,6 @@ import base64
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-import jwt
 import pydantic
 from fastapi import Depends, Request, status
 from fastapi.exceptions import HTTPException
@@ -107,6 +106,8 @@ class OIDCTokenValidator:
         self._decode_kwargs = decode_kwargs
 
     def __call__(self, token: str) -> schema.User:
+        import jwt
+
         try:
             payload = jwt.decode(token, self._jwks_client.get_signing_key_from_jwt(token).key, **self._decode_kwargs)
         except jwt.ExpiredSignatureError:

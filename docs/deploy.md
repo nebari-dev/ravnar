@@ -6,7 +6,7 @@ You can start ravnar locally with the [`ravnar serve`](references/cli.md#ravnar-
 
 ## Docker
 
-ravnar provides an [official Docker image](https://ghcr.io/openteams-ai/ravnar), `ghcr.io/openteams-ai/ravnar`.
+ravnar provides an [official Docker image](https://quay.io/nebari/ravnar), `quay.io/nebari/ravnar`.
 
 !!! warning
 
@@ -34,7 +34,7 @@ ravnar provides an [official Docker image](https://ghcr.io/openteams-ai/ravnar),
         --env RAVNAR_CONFIG=/config.yml \
         --volume ./config.yml:/config.yml:ro \
         --publish 8000:8000 \
-        ghcr.io/openteams-ai/ravnar:latest
+        quay.io/nebari/ravnar:latest
     ```
 
     with the following options in `./config.yml`
@@ -47,5 +47,4 @@ ravnar provides an [official Docker image](https://ghcr.io/openteams-ai/ravnar),
 
 ## Helm
 
-ravnar provides an [official helm chart](https://ghcr.io/openteams-ai/ravnar-chart),
-`ghcr.io/openteams-ai/ravnar/ravnar-chart`.
+ravnar provides an [official helm chart](https://quay.io/nebari/ravnar/charts/ravnar), `quay.io/nebari/charts/ravnar`.

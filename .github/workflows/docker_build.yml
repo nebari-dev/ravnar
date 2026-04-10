@@ -20,7 +20,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  IMAGE: ghcr.io/openteams-ai/ravnar
+  IMAGE: quay.io/nebari/ravnar
 
 jobs:
   metadata:
@@ -123,6 +123,13 @@ jobs:
             -- "${TO_TAGS[@]}" \
           )
           echo "to-json=${TO_JSON}" | tee --append "${GITHUB_OUTPUT}"
+
+      - name: Login to Quay.io
+        uses: docker/login-action@v3
+        with:
+          registry: quay.io
+          username: ${{ secrets.DOCKER_REGISTRY_USERNAME }}
+          password: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
 
       - name: Build and push
         uses: docker/build-push-action@v5
