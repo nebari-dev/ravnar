@@ -24,7 +24,7 @@ runs:
       shell: bash
       run: |
         CONTENT=$(dasel --out=yaml \
-          --var="chart=yaml:file:./helm/ravnar-chart/Chart.yaml" \
+          --var="chart=yaml:file:./helm/ravnar/Chart.yaml" \
           --var="chartVersion='${{ inputs.chart-version }}'" \
           --var="appVersion='${{ inputs.app-version }}'" \
           '{$chart..., "version": $chartVersion, "appVersion": $appVersion}' \

@@ -47,5 +47,4 @@ ravnar provides an [official Docker image](https://quay.io/nebari/ravnar), `quay
 
 ## Helm
 
-ravnar provides an [official helm chart](https://quay.io/nebari/ravnar/charts/ravnar),
-`quay.io/nebari/charts/ravnar`.
+ravnar provides an [official helm chart](https://quay.io/nebari/ravnar/charts/ravnar), `quay.io/nebari/charts/ravnar`.
