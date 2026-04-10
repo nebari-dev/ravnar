@@ -52,14 +52,12 @@ jobs:
 
       - name: Patch helm chart
         uses: ./.github/actions/patch-helm-chart
-        with:
-          chart: ${{ matrix.chart }}
 
       - name: Install chart dependencies
-        run: helm dependencies update ./helm/${{ matrix.chart }}
+        run: helm dependencies update ./helm/ravnar
 
       - name: Lint chart
-        run: helm lint --strict ./helm/${{ matrix.chart }}
+        run: helm lint --strict ./helm/ravnar
 
       - name: Template chart
-        run: helm template --namespace ravnar ravnar ./helm/ravnar-chart
+        run: helm template --namespace ravnar ravnar ./helm/ravnar
