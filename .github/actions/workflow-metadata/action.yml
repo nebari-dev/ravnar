@@ -56,14 +56,11 @@ runs:
       shell: bash
       run: |
         # Compute versions
-        # RAW=$(uv run hatch version)
-        RAW=0.0.1
+        RAW=$(uv run hatch version)
         echo "raw=${RAW}" | tee --append "${GITHUB_OUTPUT}"
 
-        # LATEST=$(git describe --tags --match "v[0-9]*.[0-9]*.[0-9]*" --abbrev=0| sed 's|^v||')
-        LATEST=0.0.1
+        LATEST=$(git describe --tags --match "v[0-9]*.[0-9]*.[0-9]*" --abbrev=0| sed 's|^v||')
         echo "latest=${LATEST}" | tee --append "${GITHUB_OUTPUT}"
 
-        # CHART=$(git describe --tags --match "chart/v[0-9]*.[0-9]*.[0-9]*" --abbrev=0| sed 's|^chart/v||')
-        CHART=0.0.1
+        CHART=$(git describe --tags --match "chart/v[0-9]*.[0-9]*.[0-9]*" --abbrev=0| sed 's|^chart/v||')
         echo "chart=${CHART}" | tee --append "${GITHUB_OUTPUT}"
