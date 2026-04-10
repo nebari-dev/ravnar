@@ -9,7 +9,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup environment
         uses: ./.github/actions/setup-env
@@ -45,10 +45,14 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
-      - name: Set up helm
-        uses: azure/setup-helm@v4
+      - name: Install mise and setup helm
+        uses: jdx/mise-action@v4
+        with:
+          mise_toml: |
+            [tools]
+            helm = "latest"
 
       - name: Patch helm chart
         uses: ./.github/actions/patch-helm-chart
