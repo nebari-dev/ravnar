@@ -131,7 +131,7 @@ source = "uv-dynamic-versioning"
 vcs = "git"
 style = "pep440"
 bump = true
-#strict = true
+strict = true
 ignore_untracked = true
 
 [tool.hatch.build.hooks.version]
