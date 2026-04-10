@@ -8,7 +8,7 @@ replicaCount: 1
 
 image:
   # -- The repository of the main application image
-  repository: ghcr.io/openteams-ai/ravnar
+  repository: quay.io/nebari/ravnar
   # -- The tag of the main application image. If not set, the chart's appVersion is used.
   tag: ""
   # -- The pull policy for the main application image
