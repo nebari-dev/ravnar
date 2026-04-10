@@ -23,7 +23,7 @@ runs:
     - name: Inject versions into helm chart
       shell: bash
       run: |
-        FILE='./helm/${{ inputs.chart }}/Chart.yaml'
+        FILE='./helm/ravnar/Chart.yaml'
 
         CONTENT=$(dasel --out=yaml \
           --var="chart=yaml:file:${FILE}" \
