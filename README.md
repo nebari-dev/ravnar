@@ -24,12 +24,4 @@ docker run \
 
 ## How can I learn more?
 
-Please have a look at the documentation.
-
-<!-- prettier-ignore-start -->
-> [!NOTE]  
-> The documentation is not yet deployed anywhere. Clone the repository and run the following
-> ```shell
-> uv run mkdocs serve
-> ```
-<!-- prettier-ignore-end -->
+Please have a look at the [documentation](https://ravnar.readthedocs.io).
