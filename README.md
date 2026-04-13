@@ -24,4 +24,4 @@ docker run \
 
 ## How can I learn more?
 
-Please have a look at the [documentation](https://ravnar.readthedocs.io).
+Please have a look at the [documentation](https://ravnar.nebari.dev).
