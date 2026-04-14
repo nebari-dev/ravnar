@@ -2,6 +2,7 @@ site_name: ravnar
 
 watch:
   - src
+  - scripts/docs
 
 theme:
   name: material
