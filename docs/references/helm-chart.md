@@ -1,1 +1,1 @@
-[//]: # this file is automatically hydrated by docs/tools/gen_files.py
+[//]: # this file is automatically hydrated by scripts/docs/gen_files.py

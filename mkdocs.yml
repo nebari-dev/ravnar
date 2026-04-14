@@ -13,7 +13,7 @@ theme:
 plugins:
   - search
   - macros:
-      module_name: docs/tools/macros
+      module_name: scripts/docs/macros
   - mkdocstrings:
       default_handler: python
       handlers:
@@ -30,9 +30,8 @@ plugins:
             - https://ai.pydantic.dev/objects.inv
   - gen-files:
       scripts:
-        - docs/tools/gen_files.py
+        - scripts/docs/gen_files.py
   - mkdocs-jupyter:
-      ignore: ["docs/tools/**"]
       execute: true
       include_source: True
 
