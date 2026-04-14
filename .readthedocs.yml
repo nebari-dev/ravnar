@@ -9,13 +9,8 @@ build:
       - MISE_INSTALL_PATH=./mise curl https://mise.run | sh
       - cp docs/tools/mise.toml .
       - ./mise trust --yes && ./mise install
-
-python:
-  install:
-    - method: uv
-      command: sync
-      groups:
-        - docs
+    post_install:
+      - UV_PROJECT_ENVIRONMENT=$READTHEDOCS_VIRTUALENV_PATH uv sync --link-mode=copy --locked --group=docs
 
 mkdocs:
   configuration: mkdocs.yml
