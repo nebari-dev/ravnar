@@ -16,6 +16,7 @@ __all__ = [
     "DeleteThreadsData",
     "Event",
     "QuickPrompt",
+    "RenameThreadData",
     "Thread",
 ]
 
@@ -35,7 +36,7 @@ from .misc import BaseModel
 
 class QuickPrompt(BaseModel):
     title: str
-    description: str | None
+    description: str | None = None
     prompt: str
 
 
@@ -51,10 +52,10 @@ class APIConfig(BaseModel):
 
 class Thread(BaseModel):
     id: str
-    name: str | None
+    name: str | None = None
     agent_id: str
     created_at: datetime
-    updated_at: datetime | None
+    updated_at: datetime | None = None
 
 
 class AugmentedMessageMixin(ag_ui.core.BaseMessage):
@@ -137,6 +138,10 @@ class CreateRunData(BaseModel):
     tools: list[ag_ui.core.Tool] = Field(default_factory=list)
     context: list[ag_ui.core.Context] = Field(default_factory=list)
     forwarded_props: Any = None
+
+
+class RenameThreadData(BaseModel):
+    name: str
 
 
 class DeleteThreadsData(BaseModel):

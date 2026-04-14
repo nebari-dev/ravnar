@@ -161,7 +161,7 @@ class Database(SetupTeardownMixin):
             raise Exception
         return thread
 
-    async def get_thread(self, user_id: str, id: str, with_messages: bool = False) -> orm.Thread:
+    async def get_thread(self, *, user_id: str, id: str, with_messages: bool = False) -> orm.Thread:
         async with self._get_session() as session:
             return await self._get_thread(session, user_id=user_id, id=id, with_messages=with_messages)
 
@@ -173,6 +173,12 @@ class Database(SetupTeardownMixin):
             if thread is None:
                 raise Exception
             thread.messages.extend(messages)
+            return thread
+
+    async def rename_thread(self, *, user_id: str, id: str, name: str) -> orm.Thread:
+        async with self._get_session() as session:
+            thread = await self._get_thread(session, user_id=user_id, id=id, with_messages=False)
+            thread.name = name
             return thread
 
     async def update_thread(self, thread: orm.Thread) -> None:
