@@ -5,9 +5,11 @@ build:
   tools:
     python: "3.11"
   jobs:
+    pre_install:
+      - asdf plugin add uv || true && asdf install uv latest && asdf global uv latest
+      - asdf plugin add helm-docs || true && asdf install helm-docs latest && asdf global helm-docs latest
     post_install:
-      - pip install uv
-      - UV_PROJECT_ENVIRONMENT=$READTHEDOCS_VIRTUALENV_PATH uv sync --link-mode=copy --locked
+      - UV_PROJECT_ENVIRONMENT=$READTHEDOCS_VIRTUALENV_PATH uv sync --link-mode=copy --locked --group=docs
 
 mkdocs:
   configuration: mkdocs.yml
