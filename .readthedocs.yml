@@ -5,12 +5,6 @@ build:
   tools:
     python: "3.11"
   jobs:
-    #    post_system_dependencies:
-    #      - curl https://mise.run | MISE_INSTALL_PATH="$(pwd)/mise" sh
-    #      - ls -la .
-    #      - ./mise --version
-    #      - cat docs/tools/mise.toml | tee mise.toml
-    #      - ./mise trust --yes && ./mise install
     pre_install:
       - asdf plugin add uv || true && asdf install uv latest && asdf global uv latest
       - asdf plugin add helm-docs || true && asdf install helm-docs latest && asdf global helm-docs latest
