@@ -100,6 +100,17 @@ def make_router(
 
         return await agent_handler.run(thread.agent_id, run_agent_input, callback=callback)
 
+    @router.post("/{threadId}/rename")
+    async def rename_thread(
+        *,
+        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        id: Annotated[str, Path(alias="threadId")],
+        data: schema.RenameThreadData,
+    ) -> schema.Thread:
+        return schema.Thread.model_validate(
+            await database.rename_thread(user_id=user.id, id=id, name=data.name), from_attributes=True
+        )
+
     @router.delete("")
     async def delete_threads(
         *,
