@@ -6,7 +6,7 @@ build:
     python: "3.11"
   jobs:
     post_system_dependencies:
-      - MISE_INSTALL_PATH=./mise curl https://mise.run | sh
+      - curl https://mise.run | MISE_INSTALL_PATH=./mise sh
       - cp docs/tools/mise.toml .
       - ./mise trust --yes && ./mise install
     post_install:
