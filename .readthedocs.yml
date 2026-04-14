@@ -7,7 +7,9 @@ build:
   jobs:
     post_system_dependencies:
       - curl https://mise.run | MISE_INSTALL_PATH=./mise sh
-      - cp docs/tools/mise.toml .
+      - ls -la .
+      - ./mise --version
+      - cat docs/tools/mise.toml | tee mise.toml
       - ./mise trust --yes && ./mise install
     post_install:
       - UV_PROJECT_ENVIRONMENT=$READTHEDOCS_VIRTUALENV_PATH uv sync --link-mode=copy --locked --group=docs
