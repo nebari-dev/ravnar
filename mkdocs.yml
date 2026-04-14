@@ -2,7 +2,6 @@ site_name: ravnar
 
 watch:
   - src
-  - scripts/docs
 
 theme:
   name: material
@@ -14,7 +13,7 @@ theme:
 plugins:
   - search
   - macros:
-      module_name: scripts/docs/macros
+      module_name: docs/tools/macros
   - mkdocstrings:
       default_handler: python
       handlers:
@@ -31,8 +30,9 @@ plugins:
             - https://ai.pydantic.dev/objects.inv
   - gen-files:
       scripts:
-        - scripts/docs/gen_files.py
+        - docs/tools/gen_files.py
   - mkdocs-jupyter:
+      ignore: ["docs/tools/**"]
       execute: true
       include_source: True
 

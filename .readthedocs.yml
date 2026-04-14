@@ -5,8 +5,11 @@ build:
   tools:
     python: "3.11"
   jobs:
+    post_system_dependencies:
+      - curl https://mise.run | sh
+      - cp docs/tools/mise.toml .
+      - mise trust --yes && mise install
     post_install:
-      - pip install uv
       - UV_PROJECT_ENVIRONMENT=$READTHEDOCS_VIRTUALENV_PATH uv sync --link-mode=copy --locked
 
 mkdocs:
