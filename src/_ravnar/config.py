@@ -20,12 +20,8 @@ from pydantic import (
     model_serializer,
     model_validator,
 )
-from pydantic_settings import (
-    BaseSettings,
-    PydanticBaseSettingsSource,
-    SettingsConfigDict,
-    YamlConfigSettingsSource,
-)
+from pydantic_core import PydanticCustomError
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict, YamlConfigSettingsSource
 from upath import UPath
 
 from .agents import Agent, DefaultAgent
@@ -63,6 +59,42 @@ class ImportStringWithParams(BaseModel, Generic[T]):
             m = {"cls_or_fn": m}
         return m
 
+    @model_validator(mode="before")
+    @classmethod
+    def _validate_nested(cls, data: Any) -> Any:
+        if not isinstance(data, dict) or "params" not in data or not isinstance(data["params"], dict):
+            return data
+
+        def validate(v: Any, loc: tuple[str | int, ...]) -> Any:
+            match v:
+                case dict():
+                    if "cls_or_fn" in v:
+                        try:
+                            return cls.model_validate(v)
+                        except ValidationError as ve:
+                            # rewrite the errors to include the proper location
+                            raise ValidationError.from_exception_data(
+                                ve.title,
+                                [
+                                    {
+                                        "type": PydanticCustomError(e["type"], e["msg"], e.get("ctx")),
+                                        "loc": loc + e["loc"],
+                                        "input": e["input"],
+                                    }
+                                    for e in ve.errors()
+                                ],
+                            ) from None
+
+                    return {k: validate(v, (*loc, k)) for k, v in v.items()}
+                case list():
+                    return [validate(v, (*loc, i)) for i, v in enumerate(v)]
+                case _:
+                    return v
+
+        data["params"] = {k: validate(v, ("params", k)) for k, v in data["params"].items()}
+
+        return data
+
     @field_validator("cls_or_fn", "params", mode="before")
     @classmethod
     def _render_field_templates(cls, f: Any) -> Any:
@@ -86,11 +118,10 @@ class ImportStringWithParams(BaseModel, Generic[T]):
     def __call__(self) -> T:
         def call(v: Any) -> Any:
             match v:
+                case ImportStringWithParams():
+                    return v()
                 case dict():
-                    try:
-                        return ImportStringWithParams.model_validate(v).__call__()
-                    except ValidationError:
-                        return {k: call(v) for k, v in v.items()}
+                    return {k: call(v) for k, v in v.items()}
                 case list():
                     return [call(x) for x in v]
                 case _:
