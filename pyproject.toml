@@ -190,7 +190,8 @@ testpaths = ["tests"]
 filterwarnings = [
     "error",
     "ignore::ResourceWarning",
-    "ignore:You should use `.*?` instead. Deprecated since version 1.39.0:DeprecationWarning",
+    # FIXME: isolate the root cause for this warning
+    "ignore:The '.*?' attribute with value '.*?' was provided:pydantic.warnings.UnsupportedFieldAttributeWarning",
 ]
 xfail_strict = true
 asyncio_mode = "auto"
