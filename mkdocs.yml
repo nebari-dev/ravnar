@@ -36,6 +36,24 @@ plugins:
       execute: true
       include_source: True
 
+extra:
+  analytics:
+    provider: google
+    property: G-NXNMX83GGS
+  consent:
+    title: Cookie consent
+    description: >-
+      We use cookies to analyze site traffic and improve your experience. With your consent, you help us make our
+      documentation better.
+    actions:
+      - accept
+      - reject
+      - manage
+    cookies:
+      analytics:
+        name: Google Analytics
+        checked: false
+
 markdown_extensions:
   - admonition
   - pymdownx.details
