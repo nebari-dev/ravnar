@@ -78,7 +78,7 @@ class ImportStringWithParams(BaseModel, Generic[T]):
                                 [
                                     {
                                         "type": PydanticCustomError(e["type"], e["msg"], e.get("ctx")),
-                                        "loc": (*loc, *["loc"]),
+                                        "loc": (*loc, *e["loc"]),
                                         "input": e["input"],
                                     }
                                     for e in ve.errors()
