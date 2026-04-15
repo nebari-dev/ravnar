@@ -28,7 +28,7 @@ dependencies = [
     "opentelemetry-instrumentation-fastapi>=0.60b0",
     "opentelemetry-instrumentation-sqlalchemy>=0.60b0",
     "opentelemetry-sdk>=1.39.0",
-    "pydantic>=2.11",
+    "pydantic>=2.13",
     "pydantic-core",
     "pydantic-settings[yaml]>=2.13",
     "python-multipart",
@@ -190,7 +190,8 @@ testpaths = ["tests"]
 filterwarnings = [
     "error",
     "ignore::ResourceWarning",
-    "ignore:You should use `.*?` instead. Deprecated since version 1.39.0:DeprecationWarning",
+    # FIXME: isolate the root cause for this warning
+    "ignore:The '.*?' attribute with value '.*?' was provided:pydantic.warnings.UnsupportedFieldAttributeWarning",
 ]
 xfail_strict = true
 asyncio_mode = "auto"
