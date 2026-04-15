@@ -203,17 +203,18 @@ def test_import_string_with_params(make_test_config, source, input_type):
 
 
 def test_import_string_with_params_nested_error_localization():
-    try:
+    with pytest.raises(pydantic.ValidationError) as exc_info:
         ImportStringWithParams.model_validate(
             {
                 "cls_or_fn": f"{__name__}.{MockAgent.__name__}",
                 "params": {"param": {"cls_or_fn": "non_existing_module.NonExistingClass"}},
             }
         )
-    except pydantic.ValidationError as ve:
-        assert ve.error_count() == 1
-        details = ve.errors()[0]
-        assert details["loc"] == ("params", "param", "cls_or_fn")
-        assert "non_existing_module" in details["msg"]
-    else:
-        raise AssertionError("no validation error raised")
+
+    ve = exc_info.value
+
+    assert ve.error_count() == 1
+
+    details = ve.errors()[0]
+    assert details["loc"] == ("params", "param", "cls_or_fn")
+    assert "non_existing_module" in details["msg"]
