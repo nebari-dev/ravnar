@@ -124,14 +124,15 @@ class PydanticAiAgentWrapper(_AgentBase):
         self,
         agent: pydantic_ai.Agent,
         *,
-        identity: IdentityCapabilities | None = None,
+        capabilities: AgentCapabilities | None = None,
         quick_prompts: list[QuickPrompt] | None = None,
     ) -> None:
         self._agent = agent
 
-        if identity is None:
-            identity = IdentityCapabilities(name=agent.name)
-        capabilities = AgentCapabilities(identity=identity, transport=TransportCapabilities(streaming=True))
+        if capabilities is None:
+            capabilities = AgentCapabilities(
+                identity=IdentityCapabilities(name=agent.name), transport=TransportCapabilities(streaming=True)
+            )
 
         super().__init__(capabilities=capabilities, quick_prompts=quick_prompts)
 
@@ -148,14 +149,15 @@ class AgnoAgentWrapper(_AgentBase):
         self,
         agent: agno.agent.Agent,
         *,
-        identity: IdentityCapabilities | None = None,
+        capabilities: AgentCapabilities | None = None,
         quick_prompts: list[QuickPrompt] | None = None,
     ) -> None:
         self._agent = agent
 
-        if identity is None:
-            identity = IdentityCapabilities(name=agent.name)
-        capabilities = AgentCapabilities(identity=identity, transport=TransportCapabilities(streaming=True))
+        if capabilities is None:
+            capabilities = AgentCapabilities(
+                identity=IdentityCapabilities(name=agent.name), transport=TransportCapabilities(streaming=True)
+            )
 
         super().__init__(capabilities=capabilities, quick_prompts=quick_prompts)
 
