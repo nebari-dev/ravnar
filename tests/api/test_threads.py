@@ -11,6 +11,17 @@ class TestThreads:
         with app_client() as client:
             yield client
 
+    @pytest.mark.parametrize("name", ["thread_name", None])
+    def test_create_thread(self, client, name):
+        agent_id = client.any_agent_id
+
+        response = client.post("/api/threads", json={"agentId": agent_id, "name": name}).raise_for_status()
+        thread = schema.Thread.model_validate_json(response.content)
+
+        assert thread.agent_id == agent_id
+        assert thread.name == name
+        assert thread.updated_at == thread.created_at
+
     @pytest.mark.parametrize("initial_name", ["initial_name", None])
     def test_rename_thread(self, client, initial_name):
         response = client.post(

@@ -94,7 +94,7 @@ class Thread(Base, kw_only=True, repr=False):
     name: Mapped[str | None]
 
     created_at: Mapped[datetime] = mapped_column(UtcAwareDateTime)
-    updated_at: Mapped[datetime | None] = mapped_column(UtcAwareDateTime, default=None)
+    updated_at: Mapped[datetime] = mapped_column(UtcAwareDateTime)
 
     state: Mapped[State] = mapped_column(Json, nullable=True)
     messages: Mapped[list[Message]] = relationship(

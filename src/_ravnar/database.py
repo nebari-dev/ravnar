@@ -131,8 +131,16 @@ class Database(SetupTeardownMixin):
     async def create_thread(self, *, user_id: str, id: str, name: str | None, agent_id: str) -> orm.Thread:
         # FIXME: check if thread already exists
         async with self._get_session() as session:
+            created_at = updated_at = now()
             thread = orm.Thread(
-                id=id, user_id=user_id, agent_id=agent_id, name=name, created_at=now(), state=None, messages=[]
+                id=id,
+                user_id=user_id,
+                agent_id=agent_id,
+                name=name,
+                created_at=created_at,
+                updated_at=updated_at,
+                state=None,
+                messages=[],
             )
             session.add(thread)
             return thread
