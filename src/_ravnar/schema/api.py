@@ -55,7 +55,7 @@ class Thread(BaseModel):
     name: str | None = None
     agent_id: str
     created_at: datetime
-    updated_at: datetime | None = None
+    updated_at: datetime
 
 
 class AugmentedMessageMixin(ag_ui.core.BaseMessage):
