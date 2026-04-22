@@ -28,7 +28,6 @@ import ag_ui.core
 from pydantic import Field, model_validator
 
 from _ravnar import orm
-from _ravnar.ag_ui_compatibilities import AgentCapabilities
 from _ravnar.utils import now
 
 from .misc import BaseModel
@@ -42,7 +41,7 @@ class QuickPrompt(BaseModel):
 
 class AgentConfig(BaseModel):
     id: str
-    capabilities: AgentCapabilities
+    capabilities: ag_ui.core.AgentCapabilities
     quick_prompts: list[QuickPrompt]
 
 
