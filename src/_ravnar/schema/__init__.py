@@ -23,6 +23,8 @@ __all__ = [
     "Thread",
     "User",
     "create_str_literal",
+"FileParameters",
+    "File",
 ]
 
 from .api import (
@@ -42,6 +44,6 @@ from .api import (
     Event,
     QuickPrompt,
     RenameThreadData,
-    Thread,
+    Thread, FileParameters, File
 )
 from .misc import APIRouter, BaseModel, Page, Pagination, TModel, User, create_str_literal

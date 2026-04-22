@@ -18,6 +18,8 @@ __all__ = [
     "QuickPrompt",
     "RenameThreadData",
     "Thread",
+    "FileParameters",
+    "File"
 ]
 
 import uuid
@@ -29,6 +31,8 @@ from pydantic import Field, model_validator
 
 from _ravnar import orm
 from _ravnar.utils import now
+from typing import Self
+from upath import UPath
 
 from .misc import BaseModel
 
@@ -145,3 +149,30 @@ class RenameThreadData(BaseModel):
 
 class DeleteThreadsData(BaseModel):
     ids: list[str] | None = None
+
+class FileParameters(BaseModel):
+    content_type: str
+    size: int | None = None
+    name: str | None = None
+    external_url: UPath | None = None
+
+
+class File(BaseModel):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4)
+    # mime_type, optional??? Can we get the mime type from the URL?
+    content_type: str
+    metadata: dict[str, Any] | None
+    # maybe source with str | None for URLS?
+
+    # size: int | None
+    # name: str | None
+    # external_url: UPath | None = Field(exclude=True)
+
+    @classmethod
+    def from_params(cls, params: FileParameters) -> Self:
+        return cls(
+            content_type=params.content_type,
+            size=params.size,
+            name=params.name,
+            external_url=params.external_url,
+        )
