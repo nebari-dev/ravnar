@@ -17,7 +17,7 @@ classifiers = [
 requires-python = ">=3.11,<3.15"
 dependencies = [
     # hard-pinned due to breaking changes on patch releases
-    "ag-ui-protocol==0.1.15",
+    "ag-ui-protocol==0.1.18",
     "fastapi",
     "fastsse==0.0.2",
     "jinja2",

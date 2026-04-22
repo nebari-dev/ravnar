@@ -9,8 +9,6 @@ from typing import TYPE_CHECKING, Any
 import ag_ui.core
 import pydantic
 
-from _ravnar.ag_ui_compatibilities import AgentCapabilities, IdentityCapabilities, TransportCapabilities
-
 from .mixin import SetupTeardownMixin
 
 if TYPE_CHECKING:
@@ -26,9 +24,9 @@ class Agent(abc.ABC, SetupTeardownMixin):
     @abc.abstractmethod
     def run(self, input: ag_ui.core.RunAgentInput) -> AsyncIterator[ag_ui.core.Event]: ...
 
-    def get_capabilities(self) -> AgentCapabilities:
+    def get_capabilities(self) -> ag_ui.core.AgentCapabilities:
         """The capabilities of the agent."""
-        return AgentCapabilities(transport=TransportCapabilities(streaming=True))
+        return ag_ui.core.AgentCapabilities(transport=ag_ui.core.TransportCapabilities(streaming=True))
 
     def get_quick_prompts(self) -> list[QuickPrompt]:
         """The quick prompts of the agent."""
@@ -57,7 +55,7 @@ class _AgentBase(Agent):
     def __init__(
         self,
         *,
-        capabilities: AgentCapabilities | None = None,
+        capabilities: ag_ui.core.AgentCapabilities | None = None,
         quick_prompts: list[QuickPrompt] | None = None,
     ):
         if capabilities is None:
@@ -68,7 +66,7 @@ class _AgentBase(Agent):
             quick_prompts = super().get_quick_prompts()
         self._quick_prompts = quick_prompts
 
-    def get_capabilities(self) -> AgentCapabilities:
+    def get_capabilities(self) -> ag_ui.core.AgentCapabilities:
         """The capabilities of the agent."""
         return self._capabilities
 
@@ -86,7 +84,7 @@ class SSEAgent(_AgentBase):
         url: str,
         *,
         client_kwargs: dict[str, Any] | None = None,
-        capabilities: AgentCapabilities | None = None,
+        capabilities: ag_ui.core.AgentCapabilities | None = None,
         quick_prompts: list[QuickPrompt] | None = None,
     ):
         self._method = method
@@ -124,14 +122,15 @@ class PydanticAiAgentWrapper(_AgentBase):
         self,
         agent: pydantic_ai.Agent,
         *,
-        capabilities: AgentCapabilities | None = None,
+        capabilities: ag_ui.core.AgentCapabilities | None = None,
         quick_prompts: list[QuickPrompt] | None = None,
     ) -> None:
         self._agent = agent
 
         if capabilities is None:
-            capabilities = AgentCapabilities(
-                identity=IdentityCapabilities(name=agent.name), transport=TransportCapabilities(streaming=True)
+            capabilities = ag_ui.core.AgentCapabilities(
+                identity=ag_ui.core.IdentityCapabilities(name=agent.name),
+                transport=ag_ui.core.TransportCapabilities(streaming=True),
             )
 
         super().__init__(capabilities=capabilities, quick_prompts=quick_prompts)
@@ -149,14 +148,15 @@ class AgnoAgentWrapper(_AgentBase):
         self,
         agent: agno.agent.Agent,
         *,
-        capabilities: AgentCapabilities | None = None,
+        capabilities: ag_ui.core.AgentCapabilities | None = None,
         quick_prompts: list[QuickPrompt] | None = None,
     ) -> None:
         self._agent = agent
 
         if capabilities is None:
-            capabilities = AgentCapabilities(
-                identity=IdentityCapabilities(name=agent.name), transport=TransportCapabilities(streaming=True)
+            capabilities = ag_ui.core.AgentCapabilities(
+                identity=ag_ui.core.IdentityCapabilities(name=agent.name),
+                transport=ag_ui.core.TransportCapabilities(streaming=True),
             )
 
         super().__init__(capabilities=capabilities, quick_prompts=quick_prompts)
