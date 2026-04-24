@@ -92,26 +92,23 @@ def make_router(
             if not isinstance(m, schema.AugmentedUserMessage):
                 continue
 
+            input_contents: list[ag_ui.core.TextInputContent | schema.RavnarFileInputContent] = []
             for input_content in m.content:
                 match input_content:
                     case ag_ui.core.TextInputContent():
-                        continue
+                        pass
                     case ag_ui.core.BinaryInputContent():
                         raise Exception
                     case _:
                         if isinstance(input_content.source, ag_ui_input_content_compat.InputContentCustomSource):
-                            if input_content.source.name == "ravnar":
-                                continue
-                            raise Exception
-
-                        # FIXME: emit events that this happened implicitly
-                        file = await file_handler.add(input_content, user_id=user.id)
-                        input_content.source = schema.InputContentRavnarSource(
-                            value=schema.InputContentRavnarSourceValue(file_id=file.id)
-                        )
+                            if input_content.source.name != "ravnar":
+                                raise Exception
+                        else:
+                            input_content = await file_handler.add(input_content, user_id=user.id)
+                input_contents.append(input_content)  # type: ignore[arg-type]
+            m.content = input_contents  # type: ignore[assignment]
             messages.append(m)
 
-        file_map = {}
         for m in messages:
             if not isinstance(m, schema.AugmentedUserMessage):
                 continue
@@ -124,13 +121,14 @@ def make_router(
                 ravnar_source = schema.InputContentRavnarSource.model_validate(
                     input_content.source, from_attributes=True
                 )
-                file, content = await file_handler.read(ravnar_source.value.file_id, user_id=user.id)
+                mime_type, content = await file_handler.read(ravnar_source.value.file_id, user_id=user.id)
                 input_content.source = ag_ui.core.InputContentDataSource(
                     value=await as_awaitable(lambda c: base64.b64encode(c).decode(), content),
-                    mime_type=file.mime_type,
+                    mime_type=mime_type,
                 )
-                input_content.metadata = schema.InputContentRavnarMetadata(raw=input_content.metadata, file_id=file.id)
-                file_map[file.id] = file
+                input_content.metadata = schema.InputContentRavnarMetadata(
+                    raw=input_content.metadata, file_id=ravnar_source.value.file_id
+                )
 
         run_agent_input = ag_ui.core.RunAgentInput(
             thread_id=thread.id,

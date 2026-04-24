@@ -11,7 +11,7 @@ import httpx
 import pydantic
 from upath import UPath
 
-from _ravnar import ag_ui_input_content_compat, orm, schema
+from _ravnar import orm, schema
 from _ravnar.utils import as_awaitable
 
 if TYPE_CHECKING:
@@ -53,7 +53,25 @@ class FileHandler:
             "url": self._extract_url,
         }
 
-    async def add(self, file_input_content: schema.FileInputContent, *, user_id: str) -> orm.File:
+    @staticmethod
+    def _file_to_input_content(file: orm.File) -> schema.RavnarFileInputContent:
+        return pydantic.TypeAdapter(schema.RavnarFileInputContent).validate_python(
+            {
+                "type": file.type,
+                "source": schema.InputContentRavnarSource(
+                    value=schema.InputContentRavnarSourceValue(
+                        file_id=file.id,
+                        mime_type=file.mime_type,
+                        source_type=file.source_type,
+                        source_data=file.source_data,
+                        created_at=file.created_at,
+                    )
+                ),
+                "metadata": file.metadata_,
+            }
+        )
+
+    async def add(self, file_input_content: schema.FileInputContent, *, user_id: str) -> schema.RavnarFileInputContent:
         source_type = file_input_content.source.type
         if source_type not in self._extractors:
             raise Exception
@@ -71,7 +89,7 @@ class FileHandler:
         await self._storage.write(file.id, data.content)
         await self._database.add_file(file)
 
-        return file
+        return self._file_to_input_content(file)
 
     @staticmethod
     async def _extract_data(file_input_content: schema.FileInputContent) -> _FileData:
@@ -104,36 +122,27 @@ class FileHandler:
 
         return _FileData(content=content, mime_type=mime_type, source_data={"url": url})
 
-    async def get(self, id: uuid.UUID, *, user_id: str) -> orm.File:
-        return await self._database.get_file(id=id, user_id=user_id)
+    async def get(self, id: uuid.UUID, *, user_id: str) -> schema.RavnarFileInputContent:
+        file = await self._database.get_file(id=id, user_id=user_id)
+        return self._file_to_input_content(file)
 
-    async def get_as_input_content(self, id: uuid.UUID, *, user_id: str) -> schema.FileInputContent:
-        file = await self.get(id, user_id=user_id)
-        return pydantic.TypeAdapter(schema.FileInputContent).validate_python(
-            {
-                "type": file.type,
-                "source": ag_ui_input_content_compat.InputContentCustomSource(name="ravnar", value={"file_id": id}),
-                "metadata": file.metadata_,
-            }
-        )
-
-    async def read(self, id: uuid.UUID, *, user_id: str) -> tuple[orm.File, bytes]:
-        file = await self.get(id, user_id=user_id)
+    async def read(self, id: uuid.UUID, *, user_id: str) -> tuple[str, bytes]:
+        file = await self._database.get_file(id=id, user_id=user_id)
         content = await self._storage.read(id)
-        return file, content
+        return file.mime_type, content
 
-    async def read_as_input_content(self, id: uuid.UUID, *, user_id: str) -> schema.FileInputContent:
-        file, content = await self.read(id, user_id=user_id)
-        return pydantic.TypeAdapter(schema.FileInputContent).validate_python(
-            {
-                "type": file.type,
-                "source": ag_ui.core.InputContentDataSource(
-                    value=await as_awaitable(lambda c: base64.b64encode(c).decode(), content),
-                    mime_type=file.mime_type,
-                ),
-                "metadata": {"raw": file.metadata_, "file_id": id},
-            }
-        )
+    # async def read_as_input_content(self, id: uuid.UUID, *, user_id: str) -> schema.FileInputContent:
+    #     file, content = await self.read(id, user_id=user_id)
+    #     return pydantic.TypeAdapter(schema.FileInputContent).validate_python(
+    #         {
+    #             "type": file.type,
+    #             "source": ag_ui.core.InputContentDataSource(
+    #                 value=await as_awaitable(lambda c: base64.b64encode(c).decode(), content),
+    #                 mime_type=file.mime_type,
+    #             ),
+    #             "metadata": {"raw": file.metadata_, "file_id": id},
+    #         }
+    #     )
 
     async def delete(self, id: uuid.UUID, *, user_id: str) -> None:
         await self._database.delete_file(id=id, user_id=user_id)

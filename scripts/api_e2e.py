@@ -42,22 +42,17 @@ def main():
 
     agent_ids = [a["id"] for a in config["agents"]]
 
-    file = assert_successful_response(
+    input_content = assert_successful_response(
         client.post(
             "/api/files",
             json={"type": "image", "source": {"type": "url", "value": "https://picsum.photos/200/300"}},
         )
     ).json()
-    print(json.dumps(file, indent=2))
-
-    # file = assert_successful_response(client.get(f"/api/files/{file['id']}")).json()
-    # print(json.dumps(file, indent=2))
-    #
-    # content = assert_successful_response(client.get(f"/api/files/{file['id']}/content")).content
-    # print(b"".join([content[:3], f"<{len(content) - 6} bytes>".encode(), content[-3:]]))
-
-    input_content = assert_successful_response(client.get(f"/api/files/{file['id']}/input-content")).json()
     print(json.dumps(input_content, indent=2))
+    file_id = input_content["source"]["value"]["fileId"]
+
+    content = assert_successful_response(client.get(f"/api/files/{file_id}/content")).content
+    print(b"".join([content[:3], f"<{len(content) - 6} bytes>".encode(), content[-3:]]))
 
     header("new thread")
     thread = assert_successful_response(

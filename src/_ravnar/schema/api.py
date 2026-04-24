@@ -15,12 +15,12 @@ __all__ = [
     "CreateThreadData",
     "DeleteThreadsData",
     "Event",
-    "File",
     "FileInputContent",
     "InputContentRavnarMetadata",
     "InputContentRavnarSource",
     "InputContentRavnarSourceValue",
     "QuickPrompt",
+    "RavnarFileInputContent",
     "RenameThreadData",
     "Thread",
 ]
@@ -62,14 +62,49 @@ class Thread(BaseModel):
     updated_at: datetime
 
 
+FileInputContent = Annotated[
+    ag_ui_input_content_compat.ImageInputContent
+    | ag_ui_input_content_compat.AudioInputContent
+    | ag_ui_input_content_compat.VideoInputContent
+    | ag_ui_input_content_compat.DocumentInputContent,
+    Field(discriminator="type"),
+]
+
+
 class InputContentRavnarSourceValue(BaseModel):
     file_id: uuid.UUID
+    mime_type: str
+    source_type: str
+    source_data: dict[str, Any] | None
+    created_at: datetime
 
 
 class InputContentRavnarSource(ag_ui_input_content_compat.InputContentCustomSource):
     type: Literal["custom"] = "custom"
     name: Literal["ravnar"] = "ravnar"
     value: InputContentRavnarSourceValue
+
+
+class ImageRavnarInputContent(ag_ui_input_content_compat.ImageInputContent):
+    source: InputContentRavnarSource
+
+
+class AudioRavnarInputContent(ag_ui_input_content_compat.AudioInputContent):
+    source: InputContentRavnarSource
+
+
+class VideoRavnarInputContent(ag_ui_input_content_compat.VideoInputContent):
+    source: InputContentRavnarSource
+
+
+class DocumentRavnarInputContent(ag_ui_input_content_compat.DocumentInputContent):
+    source: InputContentRavnarSource
+
+
+RavnarFileInputContent = Annotated[
+    ImageRavnarInputContent | AudioRavnarInputContent | VideoRavnarInputContent | DocumentRavnarInputContent,
+    Field(discriminator="type"),
+]
 
 
 class InputContentRavnarMetadata(BaseModel):
@@ -177,21 +212,3 @@ class RenameThreadData(BaseModel):
 
 class DeleteThreadsData(BaseModel):
     ids: list[str] | None = None
-
-
-FileInputContent = Annotated[
-    ag_ui_input_content_compat.ImageInputContent
-    | ag_ui_input_content_compat.AudioInputContent
-    | ag_ui_input_content_compat.VideoInputContent
-    | ag_ui_input_content_compat.DocumentInputContent,
-    Field(discriminator="type"),
-]
-
-
-class File(BaseModel):
-    id: uuid.UUID = Field(default_factory=uuid.uuid4)
-    mime_type: str
-    metadata: dict[str, Any] | None = Field(validation_alias="metadata_")
-    source_type: str
-    source_data: dict[str, Any]
-    created_at: datetime
