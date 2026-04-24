@@ -223,13 +223,13 @@ class InputContent(Base, kw_only=True, repr=False):
     __tablename__ = "input_contents"
 
     user_message_id: Mapped[str] = mapped_column(ForeignKey("messages.id"), primary_key=True)
-    user_message: Mapped[UserMessage] = relationship("UserMessage", back_populates="input_contents")
+    user_message: Mapped[UserMessage] = relationship("UserMessage", init=False, back_populates="input_contents")
     index: Mapped[int] = mapped_column(primary_key=True)
 
     text: Mapped[str | None]
 
-    file_id: Mapped[str | None] = mapped_column(ForeignKey("files.id"), nullable=True, unique=True)
-    file: Mapped[File | None] = relationship("File", uselist=False, lazy="selectin")
+    file_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("files.id"), nullable=True, unique=True)
+    file: Mapped[File | None] = relationship("File", init=False, uselist=False, lazy="selectin")
 
 
 class ToolCall(Base, kw_only=True, repr=False):

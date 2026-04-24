@@ -17,6 +17,9 @@ __all__ = [
     "Event",
     "File",
     "FileInputContent",
+    "InputContentRavnarMetadata",
+    "InputContentRavnarSource",
+    "InputContentRavnarSourceValue",
     "QuickPrompt",
     "RenameThreadData",
     "Thread",
@@ -24,7 +27,7 @@ __all__ = [
 
 import uuid
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import ag_ui.core
 from pydantic import BeforeValidator, Field, model_validator
@@ -57,6 +60,21 @@ class Thread(BaseModel):
     agent_id: str
     created_at: datetime
     updated_at: datetime
+
+
+class InputContentRavnarSourceValue(BaseModel):
+    file_id: uuid.UUID
+
+
+class InputContentRavnarSource(ag_ui_input_content_compat.InputContentCustomSource):
+    type: Literal["custom"] = "custom"
+    name: Literal["ravnar"] = "ravnar"
+    value: InputContentRavnarSourceValue
+
+
+class InputContentRavnarMetadata(BaseModel):
+    raw: Any
+    file_id: uuid.UUID
 
 
 class AugmentedMessageMixin(ag_ui.core.BaseMessage):

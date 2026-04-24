@@ -47,8 +47,7 @@ serve = [
     "uvloop; sys_platform != 'win32'",
 ]
 pydantic-ai = [
-    # FIXME: find the lowest version for AG-UI
-    "pydantic-ai-slim[ag-ui]>=1.60,<2",
+    "pydantic-ai-slim[ag-ui]>=1.79,<2",
 ]
 agno = [
     # FIXME: find the lowest version for AG-UI

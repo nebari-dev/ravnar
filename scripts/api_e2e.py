@@ -1,7 +1,9 @@
 import contextlib
 import json
+import uuid
 
 import httpx
+import httpx_sse
 
 
 def header(title: str):
@@ -21,9 +23,9 @@ def assert_successful_response(response: httpx.Response) -> httpx.Response:
     content = "<non-decodable bytes>"
     with contextlib.suppress(Exception):
         content = response.text
-        content = json.loads(content)
+        content = json.dumps(json.loads(content), indent=2)
 
-    raise AssertionError(f"request failed: url={response.url}, status_code={response.status_code}, {content=}")
+    raise AssertionError(f"request failed: url={response.url}, status_code={response.status_code}: {content}")
 
 
 def main():
@@ -38,6 +40,8 @@ def main():
     config = assert_successful_response(client.get("/api/config")).json()
     print(json.dumps(config, indent=2))
 
+    agent_ids = [a["id"] for a in config["agents"]]
+
     file = assert_successful_response(
         client.post(
             "/api/files",
@@ -46,16 +50,50 @@ def main():
     ).json()
     print(json.dumps(file, indent=2))
 
-    file = assert_successful_response(client.get(f"/api/files/{file['id']}")).json()
-    print(json.dumps(file, indent=2))
-
-    content = assert_successful_response(client.get(f"/api/files/{file['id']}/content")).content
-    print(b"".join([content[:3], f"<{len(content) - 6} bytes>".encode(), content[-3:]]))
+    # file = assert_successful_response(client.get(f"/api/files/{file['id']}")).json()
+    # print(json.dumps(file, indent=2))
+    #
+    # content = assert_successful_response(client.get(f"/api/files/{file['id']}/content")).content
+    # print(b"".join([content[:3], f"<{len(content) - 6} bytes>".encode(), content[-3:]]))
 
     input_content = assert_successful_response(client.get(f"/api/files/{file['id']}/input-content")).json()
     print(json.dumps(input_content, indent=2))
 
-    # agent_ids = [a["id"] for a in config["agents"]]
+    header("new thread")
+    thread = assert_successful_response(
+        client.post(
+            "/api/threads",
+            json={
+                "agentId": agent_ids[0],
+            },
+        )
+    ).json()
+    print(json.dumps(thread, indent=2))
+
+    header("new run ")
+
+    with httpx_sse.connect_sse(
+        client,
+        "POST",
+        f"/api/threads/{thread['id']}/run",
+        json={
+            "messages": [
+                {
+                    "id": str(uuid.uuid4()),
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "What can you see on the image?"},
+                        input_content,
+                    ],
+                },
+            ],
+        },
+    ) as event_source:
+        assert_successful_response(event_source.response)
+        for sse in event_source.iter_sse():
+            event = sse.json()
+            print(json.dumps(event, indent=2))
+
     #
     # header("delete existing threads")
     # assert_successful_response(client.request("DELETE", "/api/threads", json={}))
