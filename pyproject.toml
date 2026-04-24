@@ -20,6 +20,7 @@ dependencies = [
     "ag-ui-protocol==0.1.18",
     "fastapi",
     "fastsse==0.0.2",
+    "httpx>=0.28",
     "jinja2",
     "jsonpatch>=1.33,<2",
     "l2sl>=0.4,<0.5",
@@ -31,7 +32,6 @@ dependencies = [
     "pydantic>=2.13",
     "pydantic-core",
     "pydantic-settings[yaml]>=2.13",
-    "python-multipart",
     "sqlalchemy[asyncio]>=2",
     "starlette",
     "structlog>=25.4.0",
@@ -58,7 +58,6 @@ sse = [
     "httpx-sse>=0.4.0,<0.5",
 ]
 oidc = [
-    "httpx>=0.28",
     "pyjwt>=2,<3",
 ]
 all = [
@@ -79,7 +78,6 @@ lint = [
 ]
 test = [
     "compyre>=0.2.0",
-    "httpx",
     "pytest>=9",
     "pytest-asyncio>=1.3.0",
     "pytest-cases>=3.10.1",

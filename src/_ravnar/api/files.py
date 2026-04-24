@@ -1,60 +1,65 @@
-import asyncio
-import uuid
-from typing import Callable, Any
+from __future__ import annotations
 
-from fastapi import APIRouter, Response, UploadFile
+import uuid
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
+
+from fastapi import APIRouter, Depends, Response
 
 from _ravnar import schema
+
+if TYPE_CHECKING:
+    from _ravnar.file_storage import FileHandler
 
 
 def make_router(*, file_handler: FileHandler, authenticated_user: Callable[..., Any]) -> APIRouter:
     router = APIRouter(tags=["Files"])
 
-    @router.post("/upload")
-    async def upload_files(*, user: schema.User = authenticated_user, files: list[UploadFile]) -> list[schema.File]:
-        async def upload(file: UploadFile) -> schema.File:
-            return await file_handler.set(
-                user=user,
-                file=schema.File.from_params(
-                    schema.FileParameters(
-                        content_type=file.content_type or "application/octet-stream", size=file.size, name=file.filename
-                    )
-                ),
-                content=await file.read(),
-            )
-
-        return await asyncio.gather(*[upload(f) for f in files])
-
-    @router.post("/register")
-    async def register_files(
-        *, user: schema.User = authenticated_user, params: list[schema.FileParameters]
-    ) -> list[schema.File]:
-        return await asyncio.gather(
-            *[file_handler.set(user=user, file=schema.File.from_params(p), content=None) for p in params]
+    @router.post("")
+    async def upload_file(
+        *,
+        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        file_input_content: schema.FileInputContent,
+    ) -> schema.File:
+        return schema.File.model_validate(
+            await file_handler.add(file_input_content, user_id=user.id), from_attributes=True
         )
 
-    @router.get("")
-    async def get_files(*, user: schema.User = authenticated_user) -> list[schema.File]:
-        return await file_handler.get_all(user=user)
-
     @router.get("/{id}")
-    async def get_file(*, user: schema.User = authenticated_user, id: uuid.UUID) -> schema.File:
-        file = await file_handler.get(user=user, id=id)
-        if file is None:
-            raise Exception
-        return file
+    async def get_file(
+        *,
+        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        id: uuid.UUID,
+    ) -> schema.File:
+        return schema.File.model_validate(await file_handler.get(id, user_id=user.id), from_attributes=True)
 
     @router.get("/{id}/content")
-    async def read_file(*, user: schema.User = authenticated_user, id: uuid.UUID) -> Response:
-        file = await get_file(user=user, id=id)
+    async def read_file(
+        *,
+        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        id: uuid.UUID,
+    ) -> Response:
+        file, content = await file_handler.read(id, user_id=user.id)
         return Response(
-            await file_handler.read(file=file),
-            media_type=file.content_type,
+            content,
+            media_type=file.mime_type,
             headers={"Cache-Control": ", ".join(["private", "max-age=31536000", "immutable"])},
         )
 
+    @router.get("/{id}/input-content")
+    async def get_file_as_input_content(
+        *,
+        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        id: uuid.UUID,
+    ) -> schema.FileInputContent:
+        return await file_handler.get_as_input_content(id, user_id=user.id)
+
     @router.delete("/{id}")
-    async def delete_file(*, user: schema.User = authenticated_user, id: uuid.UUID) -> None:
-        await file_handler.delete(user=user, id=id)
+    async def delete_file(
+        *,
+        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        id: uuid.UUID,
+    ) -> None:
+        await file_handler.delete(id, user_id=user.id)
 
     return router

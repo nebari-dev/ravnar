@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import base64
 import uuid
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 import ag_ui.core
 import ag_ui.encoder
@@ -10,12 +11,13 @@ import fastsse
 import pydantic
 from fastapi import Depends, Path, Query
 
-from _ravnar import schema
-from _ravnar.utils import now
+from _ravnar import ag_ui_input_content_compat, schema
+from _ravnar.utils import as_awaitable, now
 
 if TYPE_CHECKING:
     from _ravnar.database import Database
     from _ravnar.events import EventProcessor
+    from _ravnar.file_storage import FileHandler
 
     from . import AgentHandler
 
@@ -24,8 +26,22 @@ else:
     ThreadsSortBy = schema.create_str_literal("created_at", "updated_at", default="created_at")
 
 
+class InputContentRavnarSourceValue(schema.BaseModel):
+    file_id: uuid.UUID
+
+
+class InputContentRavnarSource(ag_ui_input_content_compat.InputContentCustomSource):
+    type: Literal["custom"] = "custom"
+    name: Literal["ravnar"] = "ravnar"
+    value: InputContentRavnarSourceValue
+
+
 def make_router(
-    *, database: Database, agent_handler: AgentHandler, authenticated_user: Callable[..., Any]
+    *,
+    database: Database,
+    file_handler: FileHandler,
+    agent_handler: AgentHandler,
+    authenticated_user: Callable[..., Any],
 ) -> schema.APIRouter:
     router = schema.APIRouter(tags=["Threads"], dependencies=[Depends(authenticated_user)])
 
@@ -80,7 +96,47 @@ def make_router(
         messages = pydantic.TypeAdapter(list[schema.AugmentedMessage]).validate_python(
             thread.messages, from_attributes=True
         )
-        messages.extend(data.messages)
+        for m in data.messages:
+            if not isinstance(m, schema.AugmentedUserMessage):
+                continue
+
+            for input_content in m.content:
+                match input_content:
+                    case ag_ui.core.TextInputContent():
+                        pass
+                    case ag_ui.core.BinaryInputContent():
+                        raise Exception
+                    case _:
+                        pass
+                        # if isinstance(input_content.source, ag_ui_input_content_compat.InputContentCustomSource):
+                        #     # this also needs to happen on
+                        #     ravnar_source = InputContentRavnarSource.model_validate(input_content.source, from_attributes=True)
+                        #     file, content = file_handler.read(ravnar_source.value.file_id, user_id=user.id)
+                        #     input_content.source = ag_ui.core.InputContentDataSource(
+                        #         value=await as_awaitable(lambda c: base64.b64encode(c).decode(), content),
+                        #         mime_type=file.mime_type,
+                        #     )
+                        #     input_content.metadata = {"file_id": file.id, "raw": input_content.metadata}
+                        # else:
+                        #     # this can only happen on new files
+                        #     raise NotImplementedError
+            messages.append(m)
+
+        for m in messages:
+            if not isinstance(m, schema.AugmentedUserMessage):
+                continue
+
+            for input_content in m.content:
+                if not isinstance(input_content, ag_ui_input_content_compat.InputContentCustomSource):
+                    continue
+
+                ravnar_source = InputContentRavnarSource.model_validate(input_content.source, from_attributes=True)
+                file, content = file_handler.read(ravnar_source.value.file_id, user_id=user.id)
+                input_content.source = ag_ui.core.InputContentDataSource(
+                    value=await as_awaitable(lambda c: base64.b64encode(c).decode(), content),
+                    mime_type=file.mime_type,
+                )
+                input_content.metadata = {"file_id": file.id, "raw": input_content.metadata}
 
         run_agent_input = ag_ui.core.RunAgentInput(
             thread_id=thread.id,

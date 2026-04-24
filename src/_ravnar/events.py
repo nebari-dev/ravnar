@@ -120,6 +120,7 @@ class EventProcessor:
         for m in messages:
             cls: type[orm.Message]
             data: dict[str, Any]
+            # special case user message here to properly convert from ravnar source
             match m:
                 case ag_ui.core.AssistantMessage():
                     cls = orm.AssistantMessage

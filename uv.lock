@@ -2500,6 +2500,7 @@ dependencies = [
     { name = "ag-ui-protocol" },
     { name = "fastapi" },
     { name = "fastsse" },
+    { name = "httpx" },
     { name = "jinja2" },
     { name = "jsonpatch" },
     { name = "l2sl" },
@@ -2511,7 +2512,6 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-core" },
     { name = "pydantic-settings", extra = ["yaml"] },
-    { name = "python-multipart" },
     { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "starlette" },
     { name = "structlog" },
@@ -2525,7 +2525,6 @@ agno = [
 ]
 all = [
     { name = "agno" },
-    { name = "httpx" },
     { name = "httpx-sse", version = "0.4.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
     { name = "httpx-sse", version = "0.4.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13'" },
     { name = "psycopg", extra = ["binary", "pool"] },
@@ -2535,7 +2534,6 @@ all = [
     { name = "uvloop", marker = "sys_platform != 'win32'" },
 ]
 oidc = [
-    { name = "httpx" },
     { name = "pyjwt" },
 ]
 pydantic-ai = [
@@ -2555,7 +2553,6 @@ sse = [
 dev = [
     { name = "compyre" },
     { name = "hatch" },
-    { name = "httpx" },
     { name = "markupsafe" },
     { name = "mdx-truly-sane-lists" },
     { name = "mkdocs" },
@@ -2592,7 +2589,6 @@ lint = [
 ]
 test = [
     { name = "compyre" },
-    { name = "httpx" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cases" },
@@ -2606,8 +2602,7 @@ requires-dist = [
     { name = "agno", marker = "extra == 'all'", specifier = ">=2.5.2,<3" },
     { name = "fastapi" },
     { name = "fastsse", specifier = "==0.0.2" },
-    { name = "httpx", marker = "extra == 'all'", specifier = ">=0.28" },
-    { name = "httpx", marker = "extra == 'oidc'", specifier = ">=0.28" },
+    { name = "httpx", specifier = ">=0.28" },
     { name = "httpx-sse", marker = "extra == 'all'", specifier = ">=0.4.0,<0.5" },
     { name = "httpx-sse", marker = "extra == 'sse'", specifier = ">=0.4.0,<0.5" },
     { name = "jinja2" },
@@ -2627,7 +2622,6 @@ requires-dist = [
     { name = "pydantic-settings", extras = ["yaml"], specifier = ">=2.13" },
     { name = "pyjwt", marker = "extra == 'all'", specifier = ">=2,<3" },
     { name = "pyjwt", marker = "extra == 'oidc'", specifier = ">=2,<3" },
-    { name = "python-multipart" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2" },
     { name = "starlette" },
     { name = "structlog", specifier = ">=25.4.0" },
@@ -2644,7 +2638,6 @@ provides-extras = ["agno", "all", "oidc", "pydantic-ai", "serve", "sse"]
 dev = [
     { name = "compyre", specifier = ">=0.2.0" },
     { name = "hatch" },
-    { name = "httpx" },
     { name = "markupsafe" },
     { name = "mdx-truly-sane-lists", specifier = ">=1.3" },
     { name = "mkdocs", specifier = ">=1.6.1" },
@@ -2681,7 +2674,6 @@ lint = [
 ]
 test = [
     { name = "compyre", specifier = ">=0.2.0" },
-    { name = "httpx" },
     { name = "pytest", specifier = ">=9" },
     { name = "pytest-asyncio", specifier = ">=1.3.0" },
     { name = "pytest-cases", specifier = ">=3.10.1" },

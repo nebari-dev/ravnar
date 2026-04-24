@@ -1,17 +1,24 @@
 from __future__ import annotations
 
+import base64
+import dataclasses
+import mimetypes
 import uuid
+from typing import TYPE_CHECKING, Any
 
+import ag_ui.core
+import httpx
+import pydantic
 from upath import UPath
 
-from _ravnar import schema
-from .database import Database
-from .utils import as_awaitable
-import ag_ui.core
+from _ravnar import ag_ui_input_content_compat, orm, schema
+from _ravnar.utils import as_awaitable
 
-ag_ui.core.UserMessage
+if TYPE_CHECKING:
+    from _ravnar.database import Database
 
-class FileStorage:
+
+class _Storage:
     def __init__(self, root: UPath) -> None:
         self._root = root
         self._root.mkdir(parents=True, exist_ok=True)
@@ -19,59 +26,115 @@ class FileStorage:
     def _path(self, id: uuid.UUID) -> UPath:
         return self._root / str(id)
 
-    def write(self, id: uuid.UUID, data: bytes) -> None:
-        self._path(id).write_bytes(data)
+    async def write(self, id: uuid.UUID, content: bytes) -> None:
+        await as_awaitable(self._path(id).write_bytes, content)
 
-    def read(self, id: uuid.UUID) -> bytes:
-        return self._path(id).read_bytes()
+    async def read(self, id: uuid.UUID) -> bytes:
+        return await as_awaitable(self._path(id).read_bytes)
 
-    def delete(self, id: uuid.UUID) -> None:
-        self._path(id).unlink()
+    async def delete(self, id: uuid.UUID) -> None:
+        return await as_awaitable(self._path(id).unlink)
+
+
+@dataclasses.dataclass(kw_only=True)
+class _FileData:
+    content: bytes
+    mime_type: str
+    source_data: dict[str, Any] | None = None
 
 
 class FileHandler:
-    def __init__(self, *, database: Database, file_storage_path: UPath) -> None:
+    def __init__(self, *, root: UPath, database: Database) -> None:
+        self._storage = _Storage(root)
         self._database = database
-        self._file_storage = FileStorage(file_storage_path)
 
-    async def set(self, *, user: schema.User, file: schema.File, content: bytes | None) -> schema.File:
-        if content:
-            await as_awaitable(self._file_storage.write, file.id, content)
-        elif file.external_url is None:
-            raise ValueError("file must include content or an external_url")
+        self._extractors = {
+            "data": self._extract_data,
+            "url": self._extract_url,
+        }
 
-        async with self._database.get_session() as session:
-            await self._database.add_file(session, user_name=user.name, file=file)
+    async def add(self, file_input_content: schema.FileInputContent, *, user_id: str) -> orm.File:
+        source_type = file_input_content.source.type
+        if source_type not in self._extractors:
+            raise Exception
+
+        data = await self._extractors[source_type](file_input_content)
+        file = orm.File(
+            user_id=user_id,
+            type=file_input_content.type,
+            mime_type=data.mime_type,
+            metadata_=file_input_content.metadata,
+            source_type=source_type,
+            source_data=data.source_data,
+        )
+
+        await self._storage.write(file.id, data.content)
+        await self._database.add_file(file)
 
         return file
 
-    async def get_all(self, *, user: schema.User) -> list[schema.File]:
-        async with self._database.get_session() as session:
-            return await self._database.get_files(session, user_name=user.name)
+    @staticmethod
+    async def _extract_data(file_input_content: schema.FileInputContent) -> _FileData:
+        assert isinstance(file_input_content.source, ag_ui.core.InputContentDataSource)
 
-    async def get(self, *, user: schema.User, id: uuid.UUID) -> schema.File | None:
-        async with self._database.get_session() as session:
-            return await self._database.get_file(session, user_name=user.name, id=id)
-
-    async def delete(self, *, user: schema.User, id: uuid.UUID) -> None:
-        file = await self.get(user=user, id=id)
-        if file is None:
-            return
-
-        if file.external_url is not None:
-            await as_awaitable(self._file_storage.delete, id)
-
-        async with self._database.get_session() as session:
-            await self._database.delete_file(session, user_name=user.name, id=id)
-
-    async def read(self, *, file: schema.File) -> bytes:
-        return await (
-            as_awaitable(self._read_external_url, file.external_url)
-            if file.external_url
-            else as_awaitable(self._file_storage.read, file.id)
+        return _FileData(
+            content=await as_awaitable(base64.b64decode, file_input_content.source.value),
+            mime_type=file_input_content.source.mime_type,
         )
 
     @staticmethod
-    def _read_external_url(path: UPath) -> bytes:
-        with path.open("rb") as f:
-            return f.read()
+    async def _extract_url(file_input_content: schema.FileInputContent) -> _FileData:
+        assert isinstance(file_input_content.source, ag_ui.core.InputContentUrlSource)
+
+        url = file_input_content.source.value
+        mime_type = file_input_content.source.mime_type
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            response = await client.get(url)
+            if not response.is_success:
+                raise Exception
+            content = response.content
+            content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+
+        if not mime_type:
+            mime_type = content_type
+        if not mime_type:
+            mime_type, _ = mimetypes.guess_type(url, strict=False)
+        if not mime_type:
+            mime_type = "application/octet-stream"
+
+        return _FileData(content=content, mime_type=mime_type, source_data={"url": url})
+
+    async def get(self, id: uuid.UUID, *, user_id: str) -> orm.File:
+        return await self._database.get_file(id=id, user_id=user_id)
+
+    async def get_as_input_content(self, id: uuid.UUID, *, user_id: str) -> schema.FileInputContent:
+        file = await self.get(id, user_id=user_id)
+        return pydantic.TypeAdapter(schema.FileInputContent).validate_python(
+            {
+                "type": file.type,
+                "source": ag_ui_input_content_compat.InputContentCustomSource(name="ravnar", value={"file_id": id}),
+                "metadata": file.metadata_,
+            }
+        )
+
+    async def read(self, id: uuid.UUID, *, user_id: str) -> tuple[orm.File, bytes]:
+        file = await self.get(id, user_id=user_id)
+        content = await self._storage.read(id)
+        return file, content
+
+    async def read_as_input_content(self, id: uuid.UUID, *, user_id: str) -> schema.FileInputContent:
+        file, content = await self.read(id, user_id=user_id)
+        return pydantic.TypeAdapter(schema.FileInputContent).validate_python(
+            {
+                "type": file.type,
+                "source": ag_ui.core.InputContentDataSource(
+                    value=await as_awaitable(lambda c: base64.b64encode(c).decode(), content),
+                    mime_type=file.mime_type,
+                ),
+                "metadata": {"raw": file.metadata_, "file_id": id},
+            }
+        )
+
+    async def delete(self, id: uuid.UUID, *, user_id: str) -> None:
+        await self._database.delete_file(id=id, user_id=user_id)
+        await self._storage.delete(id)

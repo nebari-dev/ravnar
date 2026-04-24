@@ -15,6 +15,8 @@ __all__ = [
     "CreateThreadData",
     "DeleteThreadsData",
     "Event",
+    "File",
+    "FileInputContent",
     "Page",
     "Pagination",
     "QuickPrompt",
@@ -23,8 +25,6 @@ __all__ = [
     "Thread",
     "User",
     "create_str_literal",
-"FileParameters",
-    "File",
 ]
 
 from .api import (
@@ -42,8 +42,10 @@ from .api import (
     CreateThreadData,
     DeleteThreadsData,
     Event,
+    File,
+    FileInputContent,
     QuickPrompt,
     RenameThreadData,
-    Thread, FileParameters, File
+    Thread,
 )
 from .misc import APIRouter, BaseModel, Page, Pagination, TModel, User, create_str_literal

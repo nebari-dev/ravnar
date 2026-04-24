@@ -57,9 +57,9 @@ def cli_reference() -> None:
         )
 
     with mkdocs_gen_files.open("references/cli.md", "w") as file:
-        file.write(f"# CLI reference\n\n{get_doc(None)}")
+        file._write(f"# CLI reference\n\n{get_doc(None)}")
         for command in cli_app.registered_commands:
-            file.write(get_doc(command.name or command.callback.__name__))
+            file._write(get_doc(command.name or command.callback.__name__))
 
 
 def helm_chart_reference():
@@ -80,7 +80,7 @@ def helm_chart_reference():
         return result.stdout
 
     with mkdocs_gen_files.open("references/helm-chart.md", "w") as file:
-        file.write(content())
+        file._write(content())
 
 
 main()

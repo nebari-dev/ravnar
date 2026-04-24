@@ -15,11 +15,11 @@ __all__ = [
     "CreateThreadData",
     "DeleteThreadsData",
     "Event",
+    "File",
+    "FileInputContent",
     "QuickPrompt",
     "RenameThreadData",
     "Thread",
-    "FileParameters",
-    "File"
 ]
 
 import uuid
@@ -27,12 +27,10 @@ from datetime import datetime
 from typing import Annotated, Any
 
 import ag_ui.core
-from pydantic import Field, model_validator
+from pydantic import BeforeValidator, Field, model_validator
 
-from _ravnar import orm
+from _ravnar import ag_ui_input_content_compat, orm
 from _ravnar.utils import now
-from typing import Self
-from upath import UPath
 
 from .misc import BaseModel
 
@@ -93,8 +91,20 @@ class AugmentedAssistantMessage(ag_ui.core.AssistantMessage, AugmentedMessageMix
         return obj
 
 
+def _str_to_text_input_content(v: Any) -> Any:
+    if not isinstance(v, str):
+        return v
+
+    return [ag_ui.core.TextInputContent(text=v)]
+
+
 class AugmentedUserMessage(ag_ui.core.UserMessage, AugmentedMessageMixin):
-    pass
+    content: Annotated[  # type: ignore[assignment]
+        list[ag_ui_input_content_compat.InputContent],
+        BeforeValidator(
+            _str_to_text_input_content, json_schema_input_type=str | list[ag_ui_input_content_compat.InputContent]
+        ),
+    ]
 
 
 class AugmentedToolMessage(ag_ui.core.ToolMessage, AugmentedMessageMixin):  # type: ignore[misc]
@@ -150,29 +160,20 @@ class RenameThreadData(BaseModel):
 class DeleteThreadsData(BaseModel):
     ids: list[str] | None = None
 
-class FileParameters(BaseModel):
-    content_type: str
-    size: int | None = None
-    name: str | None = None
-    external_url: UPath | None = None
+
+FileInputContent = Annotated[
+    ag_ui_input_content_compat.ImageInputContent
+    | ag_ui_input_content_compat.AudioInputContent
+    | ag_ui_input_content_compat.VideoInputContent
+    | ag_ui_input_content_compat.DocumentInputContent,
+    Field(discriminator="type"),
+]
 
 
 class File(BaseModel):
     id: uuid.UUID = Field(default_factory=uuid.uuid4)
-    # mime_type, optional??? Can we get the mime type from the URL?
-    content_type: str
-    metadata: dict[str, Any] | None
-    # maybe source with str | None for URLS?
-
-    # size: int | None
-    # name: str | None
-    # external_url: UPath | None = Field(exclude=True)
-
-    @classmethod
-    def from_params(cls, params: FileParameters) -> Self:
-        return cls(
-            content_type=params.content_type,
-            size=params.size,
-            name=params.name,
-            external_url=params.external_url,
-        )
+    mime_type: str
+    metadata: dict[str, Any] | None = Field(validation_alias="metadata_")
+    source_type: str
+    source_data: dict[str, Any]
+    created_at: datetime
