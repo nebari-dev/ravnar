@@ -21,7 +21,8 @@ def make_router(*, file_handler: FileHandler, authenticated_user: Callable[..., 
         user: schema.User = Depends(authenticated_user),  # noqa: B008
         file_input_content: schema.FileInputContent,
     ) -> schema.RavnarFileInputContent:
-        return await file_handler.add(file_input_content, user_id=user.id)
+        file, _ = await file_handler.add(file_input_content, user_id=user.id)
+        return file
 
     @router.get("/{id}")
     async def get_file(

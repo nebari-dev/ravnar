@@ -71,7 +71,9 @@ class FileHandler:
             }
         )
 
-    async def add(self, file_input_content: schema.FileInputContent, *, user_id: str) -> schema.RavnarFileInputContent:
+    async def add(
+        self, file_input_content: schema.FileInputContent, *, user_id: str
+    ) -> tuple[schema.RavnarFileInputContent, bytes]:
         source_type = file_input_content.source.type
         if source_type not in self._extractors:
             raise Exception
@@ -89,7 +91,7 @@ class FileHandler:
         await self._storage.write(file.id, data.content)
         await self._database.add_file(file)
 
-        return self._file_to_input_content(file)
+        return self._file_to_input_content(file), data.content
 
     @staticmethod
     async def _extract_data(file_input_content: schema.FileInputContent) -> _FileData:
@@ -130,19 +132,6 @@ class FileHandler:
         file = await self._database.get_file(id=id, user_id=user_id)
         content = await self._storage.read(id)
         return file.mime_type, content
-
-    # async def read_as_input_content(self, id: uuid.UUID, *, user_id: str) -> schema.FileInputContent:
-    #     file, content = await self.read(id, user_id=user_id)
-    #     return pydantic.TypeAdapter(schema.FileInputContent).validate_python(
-    #         {
-    #             "type": file.type,
-    #             "source": ag_ui.core.InputContentDataSource(
-    #                 value=await as_awaitable(lambda c: base64.b64encode(c).decode(), content),
-    #                 mime_type=file.mime_type,
-    #             ),
-    #             "metadata": {"raw": file.metadata_, "file_id": id},
-    #         }
-    #     )
 
     async def delete(self, id: uuid.UUID, *, user_id: str) -> None:
         await self._database.delete_file(id=id, user_id=user_id)

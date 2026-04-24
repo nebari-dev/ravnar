@@ -86,48 +86,36 @@ def make_router(
         messages = pydantic.TypeAdapter(list[schema.AugmentedMessage]).validate_python(
             thread.messages, from_attributes=True
         )
-        # FIXME: consolidate the loops and avoid write / read pattern
-        # FIXME: add custom source extractor to file handler that always errors for now
-        for m in data.messages:
-            if not isinstance(m, schema.AugmentedUserMessage):
-                continue
-
-            input_contents: list[ag_ui.core.TextInputContent | schema.RavnarFileInputContent] = []
-            for input_content in m.content:
-                match input_content:
-                    case ag_ui.core.TextInputContent():
-                        pass
-                    case ag_ui.core.BinaryInputContent():
-                        raise Exception
-                    case _:
-                        if isinstance(input_content.source, ag_ui_input_content_compat.InputContentCustomSource):
-                            if input_content.source.name != "ravnar":
-                                raise Exception
-                        else:
-                            input_content = await file_handler.add(input_content, user_id=user.id)
-                input_contents.append(input_content)  # type: ignore[arg-type]
-            m.content = input_contents  # type: ignore[assignment]
-            messages.append(m)
+        messages.extend(data.messages)
 
         for m in messages:
             if not isinstance(m, schema.AugmentedUserMessage):
                 continue
 
             for input_content in m.content:
-                assert not isinstance(input_content, ag_ui.core.BinaryInputContent)
                 if isinstance(input_content, ag_ui.core.TextInputContent):
                     continue
+                if isinstance(input_content, ag_ui.core.BinaryInputContent):
+                    raise Exception
 
-                ravnar_source = schema.InputContentRavnarSource.model_validate(
-                    input_content.source, from_attributes=True
-                )
-                mime_type, content = await file_handler.read(ravnar_source.value.file_id, user_id=user.id)
+                rfic: schema.RavnarFileInputContent
+                if (
+                    isinstance(input_content.source, ag_ui_input_content_compat.InputContentCustomSource)
+                    and input_content.source.name == "ravnar"
+                ):
+                    rfic = pydantic.TypeAdapter(schema.RavnarFileInputContent).validate_python(
+                        input_content, from_attributes=True
+                    )
+                    _, content = await file_handler.read(input_content.source.value.file_id, user_id=user.id)
+                else:
+                    rfic, content = await file_handler.add(input_content, user_id=user.id)
+
                 input_content.source = ag_ui.core.InputContentDataSource(
                     value=await as_awaitable(lambda c: base64.b64encode(c).decode(), content),
-                    mime_type=mime_type,
+                    mime_type=rfic.source.value.mime_type,
                 )
                 input_content.metadata = schema.InputContentRavnarMetadata(
-                    raw=input_content.metadata, file_id=ravnar_source.value.file_id
+                    raw=input_content.metadata, file_id=rfic.source.value.file_id
                 )
 
         run_agent_input = ag_ui.core.RunAgentInput(
