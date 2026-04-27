@@ -11,7 +11,7 @@ import httpx
 import pydantic
 from upath import UPath
 
-from _ravnar import orm, schema
+from _ravnar import ag_ui_input_content_compat, orm, schema
 from _ravnar.utils import as_awaitable
 
 if TYPE_CHECKING:
@@ -93,6 +93,23 @@ class FileHandler:
 
         return self._file_to_input_content(file), data.content
 
+    async def add_or_read(
+        self, file_input_content: schema.FileInputContent, *, user_id: str
+    ) -> tuple[schema.RavnarFileInputContent, bytes]:
+        rfic: schema.RavnarFileInputContent
+        if (
+            isinstance(file_input_content.source, ag_ui_input_content_compat.InputContentCustomSource)
+            and file_input_content.source.name == "ravnar"
+        ):
+            rfic = pydantic.TypeAdapter(schema.RavnarFileInputContent).validate_python(
+                file_input_content, from_attributes=True
+            )
+            _, content = await self.read(file_input_content.source.value.file_id, user_id=user_id)
+        else:
+            rfic, content = await self.add(file_input_content, user_id=user_id)
+
+        return rfic, content
+
     @staticmethod
     async def _extract_data(file_input_content: schema.FileInputContent) -> _FileData:
         assert isinstance(file_input_content.source, ag_ui.core.InputContentDataSource)
@@ -123,6 +140,10 @@ class FileHandler:
             mime_type = "application/octet-stream"
 
         return _FileData(content=content, mime_type=mime_type, source_data={"url": url})
+
+    @staticmethod
+    async def _extract_custom(file_input_content: schema.FileInputContent) -> _FileData:
+        raise Exception
 
     async def get(self, id: uuid.UUID, *, user_id: str) -> schema.RavnarFileInputContent:
         file = await self._database.get_file(id=id, user_id=user_id)

@@ -11,7 +11,7 @@ import fastsse
 import pydantic
 from fastapi import Depends, Path, Query
 
-from _ravnar import ag_ui_input_content_compat, schema
+from _ravnar import schema
 from _ravnar.utils import as_awaitable, now
 
 if TYPE_CHECKING:
@@ -98,17 +98,7 @@ def make_router(
                 if isinstance(input_content, ag_ui.core.BinaryInputContent):
                     raise Exception
 
-                rfic: schema.RavnarFileInputContent
-                if (
-                    isinstance(input_content.source, ag_ui_input_content_compat.InputContentCustomSource)
-                    and input_content.source.name == "ravnar"
-                ):
-                    rfic = pydantic.TypeAdapter(schema.RavnarFileInputContent).validate_python(
-                        input_content, from_attributes=True
-                    )
-                    _, content = await file_handler.read(input_content.source.value.file_id, user_id=user.id)
-                else:
-                    rfic, content = await file_handler.add(input_content, user_id=user.id)
+                rfic, content = await file_handler.add_or_read(input_content, user_id=user.id)
 
                 input_content.source = ag_ui.core.InputContentDataSource(
                     value=await as_awaitable(lambda c: base64.b64encode(c).decode(), content),
