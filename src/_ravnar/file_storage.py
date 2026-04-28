@@ -51,6 +51,7 @@ class FileHandler:
         self._extractors = {
             "data": self._extract_data,
             "url": self._extract_url,
+            "custom": self._extract_custom,
         }
 
     @staticmethod
