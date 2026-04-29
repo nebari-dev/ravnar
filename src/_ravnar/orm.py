@@ -98,7 +98,7 @@ class File(Base, kw_only=True, repr=False):
         Json,
         default=None,
     )
-    created_at: Mapped[datetime] = mapped_column(default_factory=now)
+    created_at: Mapped[datetime] = mapped_column(UtcAwareDateTime, default_factory=now)
 
 
 State = Any

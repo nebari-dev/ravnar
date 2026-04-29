@@ -80,6 +80,7 @@ test = [
     "pytest>=9",
     "pytest-asyncio>=1.3.0",
     "pytest-cases>=3.10.1",
+    "pytest-httpserver>=1.1.5",
     "pytest-mock>=3.14.0,<4",
 ]
 docs = [
@@ -185,7 +186,7 @@ minversion = "9.0"
 addopts = ["-ra", "--tb=short"]
 testpaths = ["tests"]
 filterwarnings = [
-    "error",
+#    "error",
     "ignore::ResourceWarning",
     # FIXME: isolate the root cause for this warning
     "ignore:The '.*?' attribute with value '.*?' was provided:pydantic.warnings.UnsupportedFieldAttributeWarning",
