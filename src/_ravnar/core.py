@@ -15,6 +15,7 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 from _ravnar import schema
 from _ravnar.events import EventProcessor
+from _ravnar.file_storage import FileHandler
 from _ravnar.observability import configure_logging, configure_tracing
 from _ravnar.utils import resolve_forward_references
 
@@ -43,6 +44,7 @@ class Ravnar:
 
     def _make_app(self, config: BaseConfig) -> FastAPI:
         database = Database(url=str(self.config.storage.database_dsn))
+        file_handler = FileHandler(root=config.storage.file_storage_path, database=database)
 
         app = FastAPI(
             title="ravnar",
@@ -87,6 +89,7 @@ class Ravnar:
         app.include_router(
             make_api_router(
                 database=database,
+                file_handler=file_handler,
                 agent_handler=agent_handler,
                 authenticated_user=authenticated_user,
             ),

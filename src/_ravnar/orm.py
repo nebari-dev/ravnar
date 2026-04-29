@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import uuid
 from datetime import UTC, datetime
 from typing import Any, Generic, Literal, TypeVar, get_args
 
@@ -9,6 +10,8 @@ import ag_ui.core
 from sqlalchemy import ForeignKey, inspect, types
 from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import DeclarativeBase, Mapped, MappedAsDataclass, mapped_column, relationship
+
+from _ravnar.utils import now
 
 
 class Json(types.TypeDecorator):
@@ -79,6 +82,23 @@ class Page(Generic[TOrm]):
     total_count: int
     page_count: int
     items: list[TOrm]
+
+
+class File(Base, kw_only=True, repr=False):
+    __tablename__ = "files"
+
+    id: Mapped[uuid.UUID] = mapped_column(types.Uuid, primary_key=True, default_factory=uuid.uuid4)
+    user_id: Mapped[str]
+
+    type: Mapped[str]
+    mime_type: Mapped[str]
+    metadata_: Mapped[dict[str, Any] | None] = mapped_column("metadata", Json)
+    source_type: Mapped[str]
+    source_data: Mapped[dict[str, Any] | None] = mapped_column(
+        Json,
+        default=None,
+    )
+    created_at: Mapped[datetime] = mapped_column(UtcAwareDateTime, default_factory=now)
 
 
 State = Any
@@ -159,7 +179,12 @@ class UserMessage(Message, kw_only=True, repr=False):
     __mapper_args__ = {"polymorphic_identity": "user"}
 
     role: Mapped[Literal["user"]] = mapped_column(types.String, default="user", use_existing_column=True)
-    content: Mapped[str] = mapped_column(use_existing_column=True, nullable=True)
+    input_contents: Mapped[list[InputContent]] = relationship(
+        "InputContent",
+        back_populates="user_message",
+        cascade="all, delete-orphan",
+        order_by="InputContent.index",
+    )
 
 
 class ToolMessage(Message, kw_only=True, repr=False):
@@ -192,6 +217,19 @@ class ReasoningMessage(Message, kw_only=True, repr=False):
 
     role: Mapped[Literal["reasoning"]] = mapped_column(types.String, default="reasoning", use_existing_column=True)
     content: Mapped[str] = mapped_column(use_existing_column=True, nullable=True)
+
+
+class InputContent(Base, kw_only=True, repr=False):
+    __tablename__ = "input_contents"
+
+    user_message_id: Mapped[str] = mapped_column(ForeignKey("messages.id"), primary_key=True)
+    user_message: Mapped[UserMessage] = relationship("UserMessage", init=False, back_populates="input_contents")
+    index: Mapped[int] = mapped_column(primary_key=True)
+
+    text: Mapped[str | None]
+
+    file_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("files.id"), nullable=True, unique=True)
+    file: Mapped[File | None] = relationship("File", init=False, uselist=False, lazy="selectin")
 
 
 class ToolCall(Base, kw_only=True, repr=False):

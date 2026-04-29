@@ -2104,20 +2104,20 @@ wheels = [
 
 [[package]]
 name = "pydantic-ai-slim"
-version = "1.60.0"
+version = "1.86.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "genai-prices" },
-    { name = "griffe" },
+    { name = "griffelib" },
     { name = "httpx" },
     { name = "opentelemetry-api" },
     { name = "pydantic" },
     { name = "pydantic-graph" },
     { name = "typing-inspection" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/16/97/f73f439f3d415d43f38250f76852121188d0ef6114ec702e84e7d69c301d/pydantic_ai_slim-1.60.0.tar.gz", hash = "sha256:12ba3e6ef933fcb9fc6a307dbdaa43ca15bbc1b8ec77521afd1b7a526d12330f", size = 418839, upload-time = "2026-02-17T00:33:29.672Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/95/47/891272d6d9028a860953dc21e0d8d4e47966c1a28099770230dfef711898/pydantic_ai_slim-1.86.1.tar.gz", hash = "sha256:3d502df00581bdd8b26ac5d6c6c220c426e7e7c256fee0d921c3e80897a08ee5", size = 567573, upload-time = "2026-04-24T00:46:07.751Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e3/40/8cb494a4d2ba62b5f92ae8bc79a2abbbf8509cb692edd4bc841695187780/pydantic_ai_slim-1.60.0-py3-none-any.whl", hash = "sha256:6865188a225a2979c82bb022a299d438d805d258c6d3f9810f7fe4e3c86af80a", size = 546410, upload-time = "2026-02-17T00:33:21.901Z" },
+    { url = "https://files.pythonhosted.org/packages/08/72/b8ff24a16adf017c5013f0a981eea3c6057aadf434d1d23523dc8903232b/pydantic_ai_slim-1.86.1-py3-none-any.whl", hash = "sha256:1e9d3b61b351dd5222a6050596f80b22c064cf40bf7c89845f66578df57648e7", size = 724714, upload-time = "2026-04-24T00:46:00.294Z" },
 ]
 
 [package.optional-dependencies]
@@ -2230,7 +2230,7 @@ wheels = [
 
 [[package]]
 name = "pydantic-graph"
-version = "1.60.0"
+version = "1.86.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -2238,9 +2238,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "typing-inspection" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f9/e6/1cae7cd39ab29f2eebc87c0a82c7ffcdfbe88492d2fb4afaaad91534e1ff/pydantic_graph-1.60.0.tar.gz", hash = "sha256:9710e457c2f8c113fd63629f05174e45bdca917d90c69ec8cf558649f995505f", size = 58492, upload-time = "2026-02-17T00:33:32.66Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e3/90/6c2c934ba5a4ebefb33127b36adcda2914e58c1fe28c0af49aa8894806b8/pydantic_graph-1.86.1.tar.gz", hash = "sha256:d3c45bc0b782f526cc995f9826e9665888e26ab15ea783a82826a09ca9f5f930", size = 59238, upload-time = "2026-04-24T00:46:10.187Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d8/6c/ce1c0eca77c6efbf7c7168c05a244c2756bde876a52575f750471d522024/pydantic_graph-1.60.0-py3-none-any.whl", hash = "sha256:741fa1e48424b0def86079a01100ad0652e75882f0352cd157232b75ace468a5", size = 72345, upload-time = "2026-02-17T00:33:25.077Z" },
+    { url = "https://files.pythonhosted.org/packages/25/e5/c5dd495026e67fe88f37a73447fa83a928d4d6c29429795e2301b7526e7d/pydantic_graph-1.86.1-py3-none-any.whl", hash = "sha256:fbd41ade2dcf53409ab2ae9d55dd6ebb0f3ac26ccfa10a2c211c7473f57707cd", size = 73065, upload-time = "2026-04-24T00:46:03.845Z" },
 ]
 
 [[package]]
@@ -2335,6 +2335,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c1/a2/c7abc3b606125cf3732e8e613092b0e2549365e824b5f37972125c22806b/pytest_cases-3.10.1.tar.gz", hash = "sha256:451f9e3ecd5d2d81a4362c10c441126f5b3d1ae3a7efaf59f60b1fb930df2d69", size = 1095867, upload-time = "2026-03-02T23:05:33.824Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/61/f2/7a29fb0571562034b05c38dceabba48dcc622be5d6c5448db80779e55de7/pytest_cases-3.10.1-py2.py3-none-any.whl", hash = "sha256:0deb8a85b6132e44adbc1cfc57897c6a624ec23f48ab445a43c7d56a6b9315a4", size = 108870, upload-time = "2026-03-02T23:05:32.663Z" },
+]
+
+[[package]]
+name = "pytest-httpserver"
+version = "1.1.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "werkzeug" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/50/17/ad187f46998814014f7cda309de700b87c0eb4b2e111e18bc8c819be7116/pytest_httpserver-1.1.5.tar.gz", hash = "sha256:dc3d82e1fe00e491829d8939c549bf4bd9b39a260f87113c619b9d517c2f8ff1", size = 70974, upload-time = "2026-02-14T13:27:23.412Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ec/df/0bdf90b84c6a586a9fd2b509523a3ab26b1cc1b1dba2fb62a32e4411ea9e/pytest_httpserver-1.1.5-py3-none-any.whl", hash = "sha256:ee83feb587ab652c0c6729598db2820e9048233bac8df756818b7845a1621d0a", size = 23330, upload-time = "2026-02-14T13:27:22.119Z" },
 ]
 
 [[package]]
@@ -2500,6 +2512,7 @@ dependencies = [
     { name = "ag-ui-protocol" },
     { name = "fastapi" },
     { name = "fastsse" },
+    { name = "httpx" },
     { name = "jinja2" },
     { name = "jsonpatch" },
     { name = "l2sl" },
@@ -2511,7 +2524,6 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-core" },
     { name = "pydantic-settings", extra = ["yaml"] },
-    { name = "python-multipart" },
     { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "starlette" },
     { name = "structlog" },
@@ -2525,7 +2537,6 @@ agno = [
 ]
 all = [
     { name = "agno" },
-    { name = "httpx" },
     { name = "httpx-sse", version = "0.4.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
     { name = "httpx-sse", version = "0.4.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13'" },
     { name = "psycopg", extra = ["binary", "pool"] },
@@ -2535,7 +2546,6 @@ all = [
     { name = "uvloop", marker = "sys_platform != 'win32'" },
 ]
 oidc = [
-    { name = "httpx" },
     { name = "pyjwt" },
 ]
 pydantic-ai = [
@@ -2555,7 +2565,6 @@ sse = [
 dev = [
     { name = "compyre" },
     { name = "hatch" },
-    { name = "httpx" },
     { name = "markupsafe" },
     { name = "mdx-truly-sane-lists" },
     { name = "mkdocs" },
@@ -2570,6 +2579,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cases" },
+    { name = "pytest-httpserver" },
     { name = "pytest-mock" },
     { name = "ravnar", extra = ["all"] },
     { name = "uv-dynamic-versioning" },
@@ -2592,10 +2602,10 @@ lint = [
 ]
 test = [
     { name = "compyre" },
-    { name = "httpx" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cases" },
+    { name = "pytest-httpserver" },
     { name = "pytest-mock" },
 ]
 
@@ -2606,8 +2616,7 @@ requires-dist = [
     { name = "agno", marker = "extra == 'all'", specifier = ">=2.5.2,<3" },
     { name = "fastapi" },
     { name = "fastsse", specifier = "==0.0.2" },
-    { name = "httpx", marker = "extra == 'all'", specifier = ">=0.28" },
-    { name = "httpx", marker = "extra == 'oidc'", specifier = ">=0.28" },
+    { name = "httpx", specifier = ">=0.28" },
     { name = "httpx-sse", marker = "extra == 'all'", specifier = ">=0.4.0,<0.5" },
     { name = "httpx-sse", marker = "extra == 'sse'", specifier = ">=0.4.0,<0.5" },
     { name = "jinja2" },
@@ -2621,13 +2630,12 @@ requires-dist = [
     { name = "psycopg", extras = ["binary", "pool"], marker = "extra == 'all'", specifier = ">=3.2.9,<4" },
     { name = "psycopg", extras = ["binary", "pool"], marker = "extra == 'serve'", specifier = ">=3.2.9,<4" },
     { name = "pydantic", specifier = ">=2.13" },
-    { name = "pydantic-ai-slim", extras = ["ag-ui"], marker = "extra == 'all'", specifier = ">=1.60,<2" },
-    { name = "pydantic-ai-slim", extras = ["ag-ui"], marker = "extra == 'pydantic-ai'", specifier = ">=1.60,<2" },
+    { name = "pydantic-ai-slim", extras = ["ag-ui"], marker = "extra == 'all'", specifier = ">=1.79,<2" },
+    { name = "pydantic-ai-slim", extras = ["ag-ui"], marker = "extra == 'pydantic-ai'", specifier = ">=1.79,<2" },
     { name = "pydantic-core" },
     { name = "pydantic-settings", extras = ["yaml"], specifier = ">=2.13" },
     { name = "pyjwt", marker = "extra == 'all'", specifier = ">=2,<3" },
     { name = "pyjwt", marker = "extra == 'oidc'", specifier = ">=2,<3" },
-    { name = "python-multipart" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2" },
     { name = "starlette" },
     { name = "structlog", specifier = ">=25.4.0" },
@@ -2644,7 +2652,6 @@ provides-extras = ["agno", "all", "oidc", "pydantic-ai", "serve", "sse"]
 dev = [
     { name = "compyre", specifier = ">=0.2.0" },
     { name = "hatch" },
-    { name = "httpx" },
     { name = "markupsafe" },
     { name = "mdx-truly-sane-lists", specifier = ">=1.3" },
     { name = "mkdocs", specifier = ">=1.6.1" },
@@ -2659,6 +2666,7 @@ dev = [
     { name = "pytest", specifier = ">=9" },
     { name = "pytest-asyncio", specifier = ">=1.3.0" },
     { name = "pytest-cases", specifier = ">=3.10.1" },
+    { name = "pytest-httpserver", specifier = ">=1.1.5" },
     { name = "pytest-mock", specifier = ">=3.14.0,<4" },
     { name = "ravnar", extras = ["all"] },
     { name = "uv-dynamic-versioning" },
@@ -2681,10 +2689,10 @@ lint = [
 ]
 test = [
     { name = "compyre", specifier = ">=0.2.0" },
-    { name = "httpx" },
     { name = "pytest", specifier = ">=9" },
     { name = "pytest-asyncio", specifier = ">=1.3.0" },
     { name = "pytest-cases", specifier = ">=3.10.1" },
+    { name = "pytest-httpserver", specifier = ">=1.1.5" },
     { name = "pytest-mock", specifier = ">=3.14.0,<4" },
 ]
 
@@ -3303,6 +3311,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/0b/02/ae6ceac1baeda530866a85075641cec12989bd8d31af6d5ab4a3e8c92f47/webencodings-0.5.1.tar.gz", hash = "sha256:b36a1c245f2d304965eb4e0a82848379241dc04b865afcc4aab16748587e1923", size = 9721, upload-time = "2017-04-05T20:21:34.189Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f4/24/2a3e3df732393fed8b3ebf2ec078f05546de641fe1b667ee316ec1dcf3b7/webencodings-0.5.1-py2.py3-none-any.whl", hash = "sha256:a0af1213f3c2226497a97e2b3aa01a7e4bee4f403f95be16fc9acd2947514a78", size = 11774, upload-time = "2017-04-05T20:21:32.581Z" },
+]
+
+[[package]]
+name = "werkzeug"
+version = "3.1.8"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "markupsafe" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/dd/b2/381be8cfdee792dd117872481b6e378f85c957dd7c5bca38897b08f765fd/werkzeug-3.1.8.tar.gz", hash = "sha256:9bad61a4268dac112f1c5cd4630a56ede601b6ed420300677a869083d70a4c44", size = 875852, upload-time = "2026-04-02T18:49:14.268Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/93/8c/2e650f2afeb7ee576912636c23ddb621c91ac6a98e66dc8d29c3c69446e1/werkzeug-3.1.8-py3-none-any.whl", hash = "sha256:63a77fb8892bf28ebc3178683445222aa500e48ebad5ec77b0ad80f8726b1f50", size = 226459, upload-time = "2026-04-02T18:49:12.72Z" },
 ]
 
 [[package]]

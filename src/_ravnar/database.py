@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Collection
 from contextlib import AbstractAsyncContextManager, AbstractContextManager
 from math import ceil
@@ -128,6 +129,26 @@ class Database(SetupTeardownMixin):
             page_count=page_count,
             items=items,
         )
+
+    async def add_file(self, file: orm.File) -> None:
+        async with self._get_session() as session:
+            session.add(file)
+
+    async def _get_file(self, session: AsyncSession, *, id: uuid.UUID, user_id: str) -> orm.File:
+        result = await session.execute(select(orm.File).where((orm.File.id == id) & (orm.File.user_id == user_id)))
+        file = result.scalar_one_or_none()
+        if file is None:
+            raise Exception
+        return file
+
+    async def get_file(self, *, id: uuid.UUID, user_id: str) -> orm.File:
+        async with self._get_session() as session:
+            return await self._get_file(session, id=id, user_id=user_id)
+
+    async def delete_file(self, *, id: uuid.UUID, user_id: str) -> None:
+        async with self._get_session() as session:
+            file = await self._get_file(session, id=id, user_id=user_id)
+            await session.delete(file)
 
     async def create_thread(self, *, user_id: str, id: str, name: str | None, agent_id: str) -> orm.Thread:
         # FIXME: check if thread already exists

@@ -14,6 +14,7 @@ import jsonpatch
 import pydantic
 import structlog
 
+from _ravnar import schema
 from _ravnar.observability import LazyValue
 
 from . import orm
@@ -118,21 +119,40 @@ class EventProcessor:
         # FIXME: handle missing created_at timestamps
         converted_messages: dict[str, orm.Message] = {}
         for m in messages:
-            cls: type[orm.Message]
+            cls = orm.Message.__mapper__.polymorphic_map[m.role].class_
+
             data: dict[str, Any]
             match m:
+                case ag_ui.core.UserMessage():
+                    assert not isinstance(m.content, str)
+                    input_contents: list[orm.InputContent] = []
+                    for i, c in enumerate(m.content):
+                        assert not isinstance(c, ag_ui.core.BinaryInputContent)
+                        text: str | None
+                        file_id: uuid.UUID | None
+                        if isinstance(c, ag_ui.core.TextInputContent):
+                            text = c.text
+                            file_id = None
+                        else:
+                            assert isinstance(c.source, ag_ui.core.InputContentDataSource)
+                            metadata = schema.InputContentRavnarMetadata.model_validate(c.metadata)
+                            text = None
+                            file_id = metadata.file_id
+                        input_contents.append(
+                            orm.InputContent(user_message_id=m.id, index=i, text=text, file_id=file_id)
+                        )
+                    data = {**m.model_dump(exclude={"content"}), "input_contents": input_contents}
+                    print()
                 case ag_ui.core.AssistantMessage():
-                    cls = orm.AssistantMessage
-                    data = m.model_dump(exclude={"tool_calls"}) | {
-                        "tool_calls": [tool_calls[tc.id] for tc in m.tool_calls or []]
+                    data = {
+                        **m.model_dump(exclude={"tool_calls"}),
+                        "tool_calls": [tool_calls[tc.id] for tc in m.tool_calls or []],
                     }
                 case ag_ui.core.ToolMessage():
-                    cls = orm.ToolMessage
                     tool_call = tool_calls[m.tool_call_id]
                     tool_call.tool_message_id = m.id
-                    data = m.model_dump(exclude={"tool_call_id"}) | {"tool_call": tool_call}
+                    data = {**m.model_dump(exclude={"tool_call_id"}), "tool_call": tool_call}
                 case _:
-                    cls = cast(type[orm.Message], orm.Message.__mapper__.polymorphic_map[m.role].class_)
                     data = m.model_dump()
 
             if updated_at is not None:
