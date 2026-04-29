@@ -13,6 +13,7 @@ from sqlalchemy.exc import InvalidRequestError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 from sqlalchemy.orm.interfaces import ORMOption
+from fastapi import HTTPException, status
 from starlette.concurrency import run_in_threadpool
 from typing_extensions import TypedDict
 
@@ -166,7 +167,7 @@ class Database(SetupTeardownMixin):
         result = await session.execute(query)
         thread = result.scalar_one_or_none()
         if thread is None:
-            raise Exception
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Thread not found")
         return thread
 
     async def get_thread(self, *, user_id: str, id: str, with_messages: bool = False) -> orm.Thread:
@@ -179,7 +180,7 @@ class Database(SetupTeardownMixin):
             result = await session.execute(query)
             thread = result.scalar_one_or_none()
             if thread is None:
-                raise Exception
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Thread not found")
             thread.messages.extend(messages)
             return thread
 
