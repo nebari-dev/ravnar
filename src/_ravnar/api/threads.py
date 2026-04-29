@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import uuid
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Annotated, Any
@@ -11,11 +12,12 @@ import pydantic
 from fastapi import Depends, Path, Query
 
 from _ravnar import schema
-from _ravnar.utils import now
+from _ravnar.utils import as_awaitable, now
 
 if TYPE_CHECKING:
     from _ravnar.database import Database
     from _ravnar.events import EventProcessor
+    from _ravnar.file_storage import FileHandler
 
     from . import AgentHandler
 
@@ -25,7 +27,11 @@ else:
 
 
 def make_router(
-    *, database: Database, agent_handler: AgentHandler, authenticated_user: Callable[..., Any]
+    *,
+    database: Database,
+    file_handler: FileHandler,
+    agent_handler: AgentHandler,
+    authenticated_user: Callable[..., Any],
 ) -> schema.APIRouter:
     router = schema.APIRouter(tags=["Threads"], dependencies=[Depends(authenticated_user)])
 
@@ -81,6 +87,26 @@ def make_router(
             thread.messages, from_attributes=True
         )
         messages.extend(data.messages)
+
+        for m in messages:
+            if not isinstance(m, schema.AugmentedUserMessage):
+                continue
+
+            for input_content in m.content:
+                if isinstance(input_content, ag_ui.core.TextInputContent):
+                    continue
+                if isinstance(input_content, ag_ui.core.BinaryInputContent):
+                    raise Exception
+
+                rfic, content = await file_handler.add_or_read(input_content, user_id=user.id)
+
+                input_content.source = ag_ui.core.InputContentDataSource(
+                    value=await as_awaitable(lambda c: base64.b64encode(c).decode(), content),
+                    mime_type=rfic.source.value.mime_type,
+                )
+                input_content.metadata = schema.InputContentRavnarMetadata(
+                    raw=input_content.metadata, file_id=rfic.source.value.file_id
+                )
 
         run_agent_input = ag_ui.core.RunAgentInput(
             thread_id=thread.id,
