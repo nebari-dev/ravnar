@@ -9,9 +9,8 @@ from typing import TYPE_CHECKING, Any
 import ag_ui.core
 import httpx
 import pydantic
-from upath import UPath
-
 from fastapi import HTTPException, status
+from upath import UPath
 
 from _ravnar import ag_ui_input_content_compat, orm, schema
 from _ravnar.utils import as_awaitable
@@ -146,7 +145,9 @@ class FileHandler:
 
     @staticmethod
     async def _extract_custom(file_input_content: schema.FileInputContent) -> _FileData:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Custom file source type is not supported")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Custom file source type is not supported"
+        )
 
     async def get(self, id: uuid.UUID, *, user_id: str) -> schema.RavnarFileInputContent:
         file = await self._database.get_file(id=id, user_id=user_id)

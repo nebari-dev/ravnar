@@ -7,6 +7,7 @@ from contextlib import AbstractAsyncContextManager, AbstractContextManager
 from math import ceil
 from typing import Any, cast
 
+from fastapi import HTTPException, status
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from sqlalchemy import Engine, Select, asc, create_engine, desc, func, inspect, select
 from sqlalchemy.engine.url import make_url
@@ -14,7 +15,6 @@ from sqlalchemy.exc import InvalidRequestError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 from sqlalchemy.orm.interfaces import ORMOption
-from fastapi import HTTPException, status
 from starlette.concurrency import run_in_threadpool
 from typing_extensions import TypedDict
 
