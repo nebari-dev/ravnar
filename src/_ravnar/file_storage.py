@@ -11,6 +11,8 @@ import httpx
 import pydantic
 from upath import UPath
 
+from fastapi import HTTPException, status
+
 from _ravnar import ag_ui_input_content_compat, orm, schema
 from _ravnar.utils import as_awaitable
 
@@ -77,7 +79,7 @@ class FileHandler:
     ) -> tuple[schema.RavnarFileInputContent, bytes]:
         source_type = file_input_content.source.type
         if source_type not in self._extractors:
-            raise Exception
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported file source type")
 
         data = await self._extractors[source_type](file_input_content)
         file = orm.File(
@@ -129,7 +131,7 @@ class FileHandler:
         async with httpx.AsyncClient(follow_redirects=True) as client:
             response = await client.get(url)
             if not response.is_success:
-                raise Exception
+                raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to fetch file from URL")
             content = response.content
             content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
 
@@ -144,7 +146,7 @@ class FileHandler:
 
     @staticmethod
     async def _extract_custom(file_input_content: schema.FileInputContent) -> _FileData:
-        raise Exception
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Custom file source type is not supported")
 
     async def get(self, id: uuid.UUID, *, user_id: str) -> schema.RavnarFileInputContent:
         file = await self._database.get_file(id=id, user_id=user_id)

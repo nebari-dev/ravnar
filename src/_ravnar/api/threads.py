@@ -9,7 +9,7 @@ import ag_ui.core
 import ag_ui.encoder
 import fastsse
 import pydantic
-from fastapi import Depends, Path, Query
+from fastapi import Depends, HTTPException, Path, Query, status
 
 from _ravnar import schema
 from _ravnar.utils import as_awaitable, now
@@ -96,7 +96,7 @@ def make_router(
                 if isinstance(input_content, ag_ui.core.TextInputContent):
                     continue
                 if isinstance(input_content, ag_ui.core.BinaryInputContent):
-                    raise Exception
+                    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Binary input content is not supported")
 
                 rfic, content = await file_handler.add_or_read(input_content, user_id=user.id)
 
