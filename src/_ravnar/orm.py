@@ -181,6 +181,7 @@ class UserMessage(Message, kw_only=True, repr=False):
         back_populates="user_message",
         cascade="all, delete-orphan",
         order_by="InputContent.index",
+        lazy="selectin",
     )
 
 

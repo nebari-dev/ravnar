@@ -185,9 +185,6 @@ class AugmentedUserMessage(ag_ui.core.UserMessage, AugmentedMessageMixin):
             else:
                 raise RuntimeError
 
-        content = pydantic.TypeAdapter(list[ag_ui_input_content_compat.InputContent]).validate_python(
-            obj.input_contents
-        )
         obj = {field: getattr(obj, field) for field in cls.model_fields if field not in {"content"}}
         obj["content"] = content
 
