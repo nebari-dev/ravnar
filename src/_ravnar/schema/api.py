@@ -30,6 +30,7 @@ from datetime import datetime
 from typing import Annotated, Any, Literal
 
 import ag_ui.core
+import pydantic
 from pydantic import BeforeValidator, Field, model_validator
 
 from _ravnar import ag_ui_input_content_compat, orm
@@ -158,6 +159,39 @@ class AugmentedUserMessage(ag_ui.core.UserMessage, AugmentedMessageMixin):
             _str_to_text_input_content, json_schema_input_type=str | list[ag_ui_input_content_compat.InputContent]
         ),
     ]
+
+    @model_validator(mode="before")
+    @classmethod
+    def _convert_orm(cls, obj: Any) -> Any:
+        if not isinstance(obj, orm.UserMessage):
+            return obj
+
+        content: list[ag_ui_input_content_compat.InputContent] = []
+        for ic in obj.input_contents:
+            if ic.text is not None:
+                content.append(ag_ui.core.TextInputContent(text=ic.text))
+            elif ic.file is not None:
+                content.append(
+                    pydantic.TypeAdapter(RavnarFileInputContent).validate_python(
+                        {
+                            "type": ic.file.type,
+                            "source": InputContentRavnarSource(
+                                value=InputContentRavnarSourceValue.model_validate(ic.file, from_attributes=True)
+                            ),
+                            "metadata": ic.file.metadata_,
+                        }
+                    )
+                )
+            else:
+                raise RuntimeError
+
+        content = pydantic.TypeAdapter(list[ag_ui_input_content_compat.InputContent]).validate_python(
+            obj.input_contents
+        )
+        obj = {field: getattr(obj, field) for field in cls.model_fields if field not in {"content"}}
+        obj["content"] = content
+
+        return obj
 
 
 class AugmentedToolMessage(ag_ui.core.ToolMessage, AugmentedMessageMixin):  # type: ignore[misc]
