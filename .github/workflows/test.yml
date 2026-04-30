@@ -38,6 +38,7 @@ jobs:
 
       - name: Run tests
         id: tests
+        shell: bash
         env:
           COVERAGE_FILE: .coverage.${{ matrix.os }}.${{ matrix.python-version }}
         run: |
@@ -64,7 +65,7 @@ jobs:
       - name: Download coverage data
         uses: actions/download-artifact@v8
         with:
-          pattern: coverage-data-*
+          pattern: coverage-*
           merge-multiple: true
 
       - name: Coverage report
