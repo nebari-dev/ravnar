@@ -94,10 +94,7 @@ class File(Base, kw_only=True, repr=False):
     mime_type: Mapped[str]
     metadata_: Mapped[dict[str, Any] | None] = mapped_column("metadata", Json)
     source_type: Mapped[str]
-    source_data: Mapped[dict[str, Any] | None] = mapped_column(
-        Json,
-        default=None,
-    )
+    source_data: Mapped[dict[str, Any] | None] = mapped_column(Json, default=None)
     created_at: Mapped[datetime] = mapped_column(UtcAwareDateTime, default_factory=now)
 
 
@@ -184,6 +181,7 @@ class UserMessage(Message, kw_only=True, repr=False):
         back_populates="user_message",
         cascade="all, delete-orphan",
         order_by="InputContent.index",
+        lazy="selectin",
     )
 
 
