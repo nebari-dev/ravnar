@@ -38,4 +38,36 @@ jobs:
 
       - name: Run tests
         id: tests
-        run: uv run pytest --durations=25
+        env:
+          COVERAGE_FILE: .coverage.${{ matrix.os }}.${{ matrix.python-version }}
+        run: |
+          uv run pytest --durations=25 \
+            --cov=_ravnar --cov=ravnar --cov=./tests
+
+      - name: Upload coverage data
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-${{ matrix.os }}-${{ matrix.python-version }}
+          path: .coverage.*
+          if-no-files-found: error
+
+  coverage:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-env
+
+      - name: Download coverage data
+        uses: actions/download-artifact@v8
+        with:
+          pattern: coverage-data-*
+          merge-multiple: true
+
+      - name: Coverage report
+        run: |
+          uv run coverage combine
+          uv run coverage report

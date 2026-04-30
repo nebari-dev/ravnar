@@ -90,8 +90,11 @@ class Database(SetupTeardownMixin):
         orm_type: type[orm.TOrm],
         select_qualifier: Callable[[Select], Select] = lambda query: query,
         load_options: Collection[ORMOption] | None = None,
-        pagination: schema.Pagination,
+        pagination: schema.Pagination | None = None,
     ) -> orm.Page[orm.TOrm]:
+        if pagination is None:
+            pagination = schema.Pagination.as_single_page()
+
         query = select_qualifier(select(orm_type))
 
         result = await session.execute(select(func.count()).select_from(query.subquery()))
@@ -151,8 +154,13 @@ class Database(SetupTeardownMixin):
             await session.delete(file)
 
     async def create_thread(self, *, user_id: str, id: str, name: str | None, agent_id: str) -> orm.Thread:
-        # FIXME: check if thread already exists
         async with self._get_session() as session:
+            query = select(orm.Thread).where(orm.Thread.id == id)
+            result = await session.execute(query)
+            thread = result.scalar_one_or_none()
+            if thread is not None:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Thread exists")
+
             created_at = updated_at = now()
             thread = orm.Thread(
                 id=id,
@@ -168,13 +176,20 @@ class Database(SetupTeardownMixin):
             return thread
 
     async def _get_threads(
-        self, session: AsyncSession, user_id: str, pagination: schema.Pagination
+        self,
+        session: AsyncSession,
+        user_id: str,
+        ids: list[str] | None = None,
+        pagination: schema.Pagination | None = None,
     ) -> orm.Page[orm.Thread]:
+        def select_qualifier(query: Select) -> Select:
+            query = query.where(orm.Thread.user_id == user_id)
+            if ids is not None:
+                query = query.where(orm.Thread.id.in_(ids))
+            return query
+
         return await self._get_page(
-            session,
-            orm_type=orm.Thread,
-            select_qualifier=lambda query: query.where(orm.Thread.user_id == user_id),
-            pagination=pagination,
+            session, orm_type=orm.Thread, select_qualifier=select_qualifier, pagination=pagination
         )
 
     async def get_threads(self, *, user_id: str, pagination: schema.Pagination) -> orm.Page[orm.Thread]:
@@ -210,15 +225,12 @@ class Database(SetupTeardownMixin):
         async with self._get_session() as session:
             await session.merge(thread)
 
-    async def delete_threads(self, *, user_id: str, ids: list[str] | None) -> None:
+    async def delete_threads(self, *, user_id: str, ids: list[str]) -> None:
         async with self._get_session() as session:
-            if ids is None:
-                single_page = await self._get_threads(
-                    session, user_id=user_id, pagination=schema.Pagination.as_single_page()
-                )
-                threads = single_page.items
-            else:
-                threads = [await self._get_thread(session, user_id=user_id, id=id, with_messages=False) for id in ids]
+            single_page = await self._get_threads(session, user_id=user_id, ids=ids)
+            threads = single_page.items
+            if len(threads) != len(ids):
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Threads not found")
 
             for t in threads:
                 await session.delete(t)

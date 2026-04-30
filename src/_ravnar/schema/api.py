@@ -211,4 +211,4 @@ class RenameThreadData(BaseModel):
 
 
 class DeleteThreadsData(BaseModel):
-    ids: list[str] | None = None
+    ids: list[str]
