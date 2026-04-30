@@ -45,6 +45,10 @@ jobs:
           uv run pytest --durations=25 \
             --cov=_ravnar --cov=ravnar --cov=./tests
 
+      - name: Debug
+        shell: bash
+        run: ls -la
+
       - name: Upload coverage data
         uses: actions/upload-artifact@v7
         with:
