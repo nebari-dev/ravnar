@@ -176,7 +176,13 @@ class AugmentedUserMessage(ag_ui.core.UserMessage, AugmentedMessageMixin):
                         {
                             "type": ic.file.type,
                             "source": InputContentRavnarSource(
-                                value=InputContentRavnarSourceValue.model_validate(ic.file, from_attributes=True)
+                                value=InputContentRavnarSourceValue(
+                                    file_id=ic.file.id,
+                                    mime_type=ic.file.mime_type,
+                                    source_type=ic.file.source_type,
+                                    source_data=ic.file.source_data,
+                                    created_at=ic.file.created_at,
+                                )
                             ),
                             "metadata": ic.file.metadata_,
                         }
