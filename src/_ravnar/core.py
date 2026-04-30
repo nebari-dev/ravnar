@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, cast
 import ag_ui.core
 import ag_ui.encoder
 import fastsse
-from fastapi import FastAPI, status
+from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, Response
 from opentelemetry import trace
@@ -132,7 +132,7 @@ class AgentHandler:
 
     def assert_available(self, agent_id: str) -> None:
         if agent_id not in self._agents:
-            raise Exception
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
 
     def _sse_encoder(self, data: fastsse.Data) -> bytes:
         return self._event_encoder.encode(cast(ag_ui.core.Event, data)).encode()

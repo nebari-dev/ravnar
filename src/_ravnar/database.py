@@ -7,6 +7,7 @@ from contextlib import AbstractAsyncContextManager, AbstractContextManager
 from math import ceil
 from typing import Any, cast
 
+from fastapi import HTTPException, status
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from sqlalchemy import Engine, Select, asc, create_engine, desc, func, inspect, select
 from sqlalchemy.engine.url import make_url
@@ -137,7 +138,7 @@ class Database(SetupTeardownMixin):
         result = await session.execute(select(orm.File).where((orm.File.id == id) & (orm.File.user_id == user_id)))
         file = result.scalar_one_or_none()
         if file is None:
-            raise Exception
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
         return file
 
     async def get_file(self, *, id: uuid.UUID, user_id: str) -> orm.File:
@@ -187,22 +188,17 @@ class Database(SetupTeardownMixin):
         result = await session.execute(query)
         thread = result.scalar_one_or_none()
         if thread is None:
-            raise Exception
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Thread not found")
         return thread
 
     async def get_thread(self, *, user_id: str, id: str, with_messages: bool = False) -> orm.Thread:
         async with self._get_session() as session:
             return await self._get_thread(session, user_id=user_id, id=id, with_messages=with_messages)
 
-    async def append_messages_to_thread(self, *, user_id: str, id: str, messages: list[orm.Message]) -> orm.Thread:
+    async def append_messages_to_thread(self, *, user_id: str, id: str, messages: list[orm.Message]) -> None:
         async with self._get_session() as session:
-            query = select(orm.Thread).where((orm.Thread.id == id) & (orm.Thread.user_id == user_id))
-            result = await session.execute(query)
-            thread = result.scalar_one_or_none()
-            if thread is None:
-                raise Exception
+            thread = await self._get_thread(session, user_id=user_id, id=id, with_messages=False)
             thread.messages.extend(messages)
-            return thread
 
     async def rename_thread(self, *, user_id: str, id: str, name: str) -> orm.Thread:
         async with self._get_session() as session:
