@@ -54,6 +54,7 @@ jobs:
         with:
           name: coverage-${{ matrix.os }}-${{ matrix.python-version }}
           path: .coverage.*
+          include-hidden-files: true
           if-no-files-found: error
 
   coverage:
