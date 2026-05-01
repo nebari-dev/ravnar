@@ -106,7 +106,7 @@ class FileHandler:
             rfic = pydantic.TypeAdapter(schema.RavnarFileInputContent).validate_python(
                 file_input_content, from_attributes=True
             )
-            _, content = await self.read(rfic.source.value.file_id, user_id=user_id) # type: ignore
+            _, content = await self.read(rfic.source.value.file_id, user_id=user_id)  # type: ignore
         else:
             rfic, content = await self.add(file_input_content, user_id=user_id)
 
