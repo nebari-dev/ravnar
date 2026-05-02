@@ -102,6 +102,14 @@ def make_router(
 
                 rfic, content = await file_handler.add_or_read(input_content, user_id=user.id)
 
+                # Copy the `rfic` model to prevent errant mutations because somehow
+                # the assignment to `input_content.source` causes `rfic.source.value`
+                # to change from an object to a string, and causes 500 errors.
+                #
+                # This is probably because the `input_content.source` dict is passed thru
+                # un-copied from the `file_handler.add_or_read` method and then mutated.
+                rfic = rfic.model_copy()
+
                 input_content.source = ag_ui.core.InputContentDataSource(
                     value=await as_awaitable(lambda c: base64.b64encode(c).decode(), content),
                     mime_type=rfic.source.value.mime_type,
