@@ -4,14 +4,14 @@ from fastapi import status
 from _ravnar import schema
 from _ravnar.authenticators import BearerTokenAuthenticator, ForwardedUserAuthenticator
 from _ravnar.config import BaseConfig
-from tests.utils import app_client
+from tests.utils import make_app_client
 
 
 class TestForwardedUserAuthenticator:
     @pytest.fixture(scope="class")
     def client(self):
         config = BaseConfig.model_validate({"security": {"authenticator": ForwardedUserAuthenticator}})
-        with app_client(config) as client:
+        with make_app_client(config) as client:
             yield client
 
     def test_no_header(self, client):
@@ -39,7 +39,7 @@ class TestBearerTokenAuthenticator:
                 }
             }
         )
-        with app_client(config) as client:
+        with make_app_client(config) as client:
             yield client
 
     @pytest.mark.parametrize(

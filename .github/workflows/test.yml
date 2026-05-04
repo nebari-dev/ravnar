@@ -38,4 +38,9 @@ jobs:
 
       - name: Run tests
         id: tests
-        run: uv run pytest --durations=25
+        shell: bash
+        env:
+          COVERAGE_FILE: .coverage.${{ matrix.os }}.${{ matrix.python-version }}
+        run: |
+          uv run pytest --durations=25 \
+            --cov=_ravnar --cov=ravnar --cov=./tests
