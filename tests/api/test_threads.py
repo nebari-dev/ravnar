@@ -322,4 +322,11 @@ class TestThreadsCreateRun:
         )
         list(event_stream)
 
+        event_stream = self.create_run(
+            app_client,
+            thread_id=thread_id,
+            data={"messages": [{"role": "user", "content": [{"type": "text", "text": "question 2"}]}]},
+        )
+        list(event_stream)
+
         app_client.get(f"/api/threads/{thread_id}/messages").raise_for_status()
