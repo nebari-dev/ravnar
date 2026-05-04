@@ -5,6 +5,8 @@ import os
 import httpx
 import pytest
 
+from tests.utils import make_app_client
+
 
 @pytest.fixture(autouse=True)
 def ravnar_local_storage(mocker, tmp_path):
@@ -45,3 +47,9 @@ def enhance_raise_for_status(session_mocker):
         ),
         new=enhanced_raise_for_status,
     )
+
+
+@pytest.fixture
+def app_client():
+    with make_app_client() as client:
+        yield client

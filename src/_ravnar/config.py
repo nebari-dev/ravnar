@@ -162,7 +162,7 @@ class CORSConfig(BaseModel, RenderableMixin):
     allowed_headers: list[str] = Field(default_factory=list)
 
 
-class Security(BaseModel, RenderableMixin):
+class SecurityConfig(BaseModel, RenderableMixin):
     authenticator: ImportStringWithParams[Authenticator] | None = None
     cors: CORSConfig = Field(default_factory=CORSConfig)
 
@@ -183,7 +183,7 @@ class StorageConfig(BaseModel, RenderableMixin):
 
 class BaseConfig(BaseSettings, RenderableMixin):
     server: ServerConfig = Field(default_factory=ServerConfig)
-    security: Security = Field(default_factory=Security)
+    security: SecurityConfig = Field(default_factory=SecurityConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
 
     agents: dict[str, ImportStringWithParams[Agent]] = Field(
