@@ -42,7 +42,7 @@ class DefaultAgent(Agent):
         """
 
         yield ag_ui.core.RunStartedEvent(
-            thread_id=input.thread_id, run_id=input.run_id, parent_run_id=input.parent_run_id, input=input
+            thread_id=input.thread_id, run_id=input.run_id, parent_run_id=input.parent_run_id
         )
         yield ag_ui.core.TextMessageStartEvent(message_id=message_id)
         for delta in textwrap.dedent(message.strip()).split():

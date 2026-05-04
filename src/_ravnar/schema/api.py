@@ -113,7 +113,8 @@ class InputContentRavnarMetadata(BaseModel):
     file_id: uuid.UUID
 
 
-class AugmentedMessageMixin(ag_ui.core.BaseMessage):
+class AugmentedMessageMixin(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     created_at: datetime = Field(default_factory=now)
     updated_at: datetime | None = None
 
@@ -126,15 +127,15 @@ class AugmentedMessageMixin(ag_ui.core.BaseMessage):
         )
 
 
-class AugmentedDeveloperMessage(ag_ui.core.DeveloperMessage, AugmentedMessageMixin):
+class AugmentedDeveloperMessage(AugmentedMessageMixin, ag_ui.core.DeveloperMessage):
     pass
 
 
-class AugmentedSystemMessage(ag_ui.core.SystemMessage, AugmentedMessageMixin):
+class AugmentedSystemMessage(AugmentedMessageMixin, ag_ui.core.SystemMessage):
     pass
 
 
-class AugmentedAssistantMessage(ag_ui.core.AssistantMessage, AugmentedMessageMixin):
+class AugmentedAssistantMessage(AugmentedMessageMixin, ag_ui.core.AssistantMessage):
     @model_validator(mode="before")
     @classmethod
     def _convert_orm(cls, obj: Any) -> Any:
@@ -152,7 +153,10 @@ def _str_to_text_input_content(v: Any) -> Any:
     return [ag_ui.core.TextInputContent(text=v)]
 
 
-class AugmentedUserMessage(ag_ui.core.UserMessage, AugmentedMessageMixin):
+class AugmentedUserMessage(
+    AugmentedMessageMixin,
+    ag_ui.core.UserMessage,
+):
     content: Annotated[  # type: ignore[assignment]
         list[ag_ui_input_content_compat.InputContent],
         BeforeValidator(
@@ -197,7 +201,7 @@ class AugmentedUserMessage(ag_ui.core.UserMessage, AugmentedMessageMixin):
         return obj
 
 
-class AugmentedToolMessage(ag_ui.core.ToolMessage, AugmentedMessageMixin):  # type: ignore[misc]
+class AugmentedToolMessage(AugmentedMessageMixin, ag_ui.core.ToolMessage):
     @model_validator(mode="before")
     @classmethod
     def _convert_orm(cls, obj: Any) -> Any:
@@ -208,11 +212,11 @@ class AugmentedToolMessage(ag_ui.core.ToolMessage, AugmentedMessageMixin):  # ty
         return obj
 
 
-class AugmentedActivityMessage(ag_ui.core.ActivityMessage, AugmentedMessageMixin):  # type: ignore[misc]
+class AugmentedActivityMessage(AugmentedMessageMixin, ag_ui.core.ActivityMessage):
     pass
 
 
-class AugmentedReasoningMessage(ag_ui.core.ReasoningMessage, AugmentedMessageMixin):  # type: ignore[misc]
+class AugmentedReasoningMessage(AugmentedMessageMixin, ag_ui.core.ReasoningMessage):
     pass
 
 

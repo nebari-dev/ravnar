@@ -19,23 +19,25 @@ def ravnar_local_storage(mocker, tmp_path):
 def enhance_raise_for_status(session_mocker):
     raise_for_status = httpx.Response.raise_for_status
 
-    def enhanced_raise_for_status(self):
+    def enhanced_raise_for_status(self: httpx.Response):
         __tracebackhide__ = True
 
         try:
             return raise_for_status(self)
         except httpx.HTTPStatusError as error:
-            content = None
-            with contextlib.suppress(Exception):
-                content = error.response.read()
-                content = content.decode()
-                content = "\n" + json.dumps(json.loads(content), indent=2)
+            content = self.read()
 
-            if content is None:
-                raise error
+            if content:
+                text = f"<{len(content)} non-decodable bytes>"
+                with contextlib.suppress(Exception):
+                    text = content.decode()
+                    text = f"\n{json.dumps(json.loads(content), indent=2)}"
 
-            message = f"{error}\nResponse content: {content}"
-            raise httpx.HTTPStatusError(message, request=error.request, response=error.response) from None
+                message = f"{error}\nResponse content: {text}"
+            else:
+                message = str(error)
+
+            raise httpx.HTTPStatusError(message, request=self.request, response=self) from None
 
     yield session_mocker.patch(
         ".".join(
