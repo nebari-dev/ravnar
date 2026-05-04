@@ -257,10 +257,7 @@ class TestThreadsCreateRun:
         response = app_client.post("/api/threads", json={"agentId": app_client.any_agent_id}).raise_for_status()
         return schema.Thread.model_validate_json(response.content)
 
-    def create_run(self, client, *, thread_id=None, data, **kwargs):
-        if thread_id is None:
-            thread_id = self.create_thread(client, **kwargs).id
-
+    def create_run(self, client, *, thread_id, data, **kwargs):
         ta = pydantic.TypeAdapter(ag_ui.core.Event)
 
         with httpx_sse.connect_sse(
@@ -275,9 +272,11 @@ class TestThreadsCreateRun:
                 yield ta.validate_json(sse.data)
 
     def test_implicit_file_upload_smoke(self, app_client):
-        # FIXME: remove required ID
+        thread_id = self.create_thread(app_client).id
+
         event_stream = self.create_run(
             app_client,
+            thread_id=thread_id,
             data={
                 "messages": [
                     {
@@ -298,6 +297,8 @@ class TestThreadsCreateRun:
         )
         list(event_stream)
 
+        app_client.get(f"/api/threads/{thread_id}/messages").raise_for_status()
+
     def test_files_smoke(self, app_client):
         response = app_client.post(
             "/api/files",
@@ -312,8 +313,13 @@ class TestThreadsCreateRun:
         ).raise_for_status()
         file_input_content = response.json()
 
+        thread_id = self.create_thread(app_client).id
+
         event_stream = self.create_run(
             app_client,
+            thread_id=thread_id,
             data={"messages": [{"role": "user", "content": [file_input_content]}]},
         )
         list(event_stream)
+
+        app_client.get(f"/api/threads/{thread_id}/messages").raise_for_status()
