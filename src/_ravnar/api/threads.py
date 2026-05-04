@@ -108,7 +108,7 @@ def make_router(
                 #
                 # This is probably because the `input_content.source` dict is passed thru
                 # un-copied from the `file_handler.add_or_read` method and then mutated.
-                rfic = rfic.model_copy()
+                # rfic = rfic.model_copy()
 
                 input_content.source = ag_ui.core.InputContentDataSource(
                     value=await as_awaitable(lambda c: base64.b64encode(c).decode(), content),
