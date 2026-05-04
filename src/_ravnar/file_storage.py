@@ -98,15 +98,15 @@ class FileHandler:
     async def add_or_read(
         self, file_input_content: schema.FileInputContent, *, user_id: str
     ) -> tuple[schema.RavnarFileInputContent, bytes]:
-        rfic: schema.RavnarFileInputContent
         if (
             isinstance(file_input_content.source, ag_ui_input_content_compat.InputContentCustomSource)
             and file_input_content.source.name == "ravnar"
         ):
-            rfic = pydantic.TypeAdapter(schema.RavnarFileInputContent).validate_python(
-                file_input_content, from_attributes=True
-            )
-            _, content = await self.read(file_input_content.source.value.file_id, user_id=user_id)
+            ta = pydantic.TypeAdapter[schema.RavnarFileInputContent](schema.RavnarFileInputContent)
+            rfic = ta.validate_python(file_input_content, from_attributes=True)
+            if rfic is file_input_content:
+                rfic = rfic.model_copy()
+            _, content = await self.read(rfic.source.value.file_id, user_id=user_id)
         else:
             rfic, content = await self.add(file_input_content, user_id=user_id)
 

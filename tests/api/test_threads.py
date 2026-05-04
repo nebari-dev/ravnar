@@ -1,6 +1,9 @@
+import base64
 import uuid
 
+import ag_ui.core
 import compyre
+import httpx_sse
 import pydantic
 import pytest
 from fastapi import status
@@ -247,3 +250,83 @@ class TestThreadsCRUD:
         response = app_client.get(f"/api/threads/{thread.id}", headers={"User": "A"})
         actual = schema.Thread.model_validate_json(response.content)
         compyre.assert_equal(actual, expected)
+
+
+class TestThreadsCreateRun:
+    def create_thread(self, app_client, **kwargs) -> schema.Thread:
+        response = app_client.post("/api/threads", json={"agentId": app_client.any_agent_id}).raise_for_status()
+        return schema.Thread.model_validate_json(response.content)
+
+    def create_run(self, client, *, thread_id, data, **kwargs):
+        ta = pydantic.TypeAdapter(ag_ui.core.Event)
+
+        with httpx_sse.connect_sse(
+            client,
+            "POST",
+            f"/api/threads/{thread_id}/run",
+            json=schema.CreateRunData.model_validate(data).model_dump(mode="json", by_alias=True, exclude_unset=True),
+            **kwargs,
+        ) as event_source:
+            event_source.response.raise_for_status()
+            for sse in event_source.iter_sse():
+                yield ta.validate_json(sse.data)
+
+    def test_implicit_file_upload_smoke(self, app_client):
+        thread_id = self.create_thread(app_client).id
+
+        event_stream = self.create_run(
+            app_client,
+            thread_id=thread_id,
+            data={
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "data",
+                                    "value": base64.b64encode(b"content").decode(),
+                                    "mimeType": "image/jpeg",
+                                },
+                            }
+                        ],
+                    }
+                ]
+            },
+        )
+        list(event_stream)
+
+        app_client.get(f"/api/threads/{thread_id}/messages").raise_for_status()
+
+    def test_files_smoke(self, app_client):
+        response = app_client.post(
+            "/api/files",
+            json={
+                "type": "image",
+                "source": {
+                    "type": "data",
+                    "value": base64.b64encode(b"content").decode(),
+                    "mimeType": "image/jpeg",
+                },
+            },
+        ).raise_for_status()
+        file_input_content = response.json()
+
+        thread_id = self.create_thread(app_client).id
+
+        event_stream = self.create_run(
+            app_client,
+            thread_id=thread_id,
+            data={"messages": [{"role": "user", "content": [file_input_content]}]},
+        )
+        list(event_stream)
+
+        event_stream = self.create_run(
+            app_client,
+            thread_id=thread_id,
+            data={"messages": [{"role": "user", "content": [{"type": "text", "text": "question 2"}]}]},
+        )
+        list(event_stream)
+
+        app_client.get(f"/api/threads/{thread_id}/messages").raise_for_status()
