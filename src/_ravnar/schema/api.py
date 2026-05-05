@@ -15,25 +15,19 @@ __all__ = [
     "CreateThreadData",
     "DeleteThreadsData",
     "Event",
-    "FileInputContent",
-    "InputContentRavnarMetadata",
-    "InputContentRavnarSource",
-    "InputContentRavnarSourceValue",
     "QuickPrompt",
-    "RavnarFileInputContent",
     "RenameThreadData",
     "Thread",
 ]
 
 import uuid
 from datetime import datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 import ag_ui.core
-import pydantic
 from pydantic import BeforeValidator, Field, model_validator
 
-from _ravnar import ag_ui_input_content_compat, orm
+from _ravnar import orm
 from _ravnar.utils import now
 
 from .misc import BaseModel
@@ -61,56 +55,6 @@ class Thread(BaseModel):
     agent_id: str
     created_at: datetime
     updated_at: datetime
-
-
-FileInputContent = Annotated[
-    ag_ui_input_content_compat.ImageInputContent
-    | ag_ui_input_content_compat.AudioInputContent
-    | ag_ui_input_content_compat.VideoInputContent
-    | ag_ui_input_content_compat.DocumentInputContent,
-    Field(discriminator="type"),
-]
-
-
-class InputContentRavnarSourceValue(BaseModel):
-    file_id: uuid.UUID
-    mime_type: str
-    source_type: str
-    source_data: dict[str, Any] | None
-    created_at: datetime
-
-
-class InputContentRavnarSource(ag_ui_input_content_compat.InputContentCustomSource):
-    type: Literal["custom"] = "custom"
-    name: Literal["ravnar"] = "ravnar"
-    value: InputContentRavnarSourceValue
-
-
-class ImageRavnarInputContent(ag_ui_input_content_compat.ImageInputContent):
-    source: InputContentRavnarSource
-
-
-class AudioRavnarInputContent(ag_ui_input_content_compat.AudioInputContent):
-    source: InputContentRavnarSource
-
-
-class VideoRavnarInputContent(ag_ui_input_content_compat.VideoInputContent):
-    source: InputContentRavnarSource
-
-
-class DocumentRavnarInputContent(ag_ui_input_content_compat.DocumentInputContent):
-    source: InputContentRavnarSource
-
-
-RavnarFileInputContent = Annotated[
-    ImageRavnarInputContent | AudioRavnarInputContent | VideoRavnarInputContent | DocumentRavnarInputContent,
-    Field(discriminator="type"),
-]
-
-
-class InputContentRavnarMetadata(BaseModel):
-    raw: Any
-    file_id: uuid.UUID
 
 
 class AugmentedMessageMixin(BaseModel):
@@ -157,11 +101,9 @@ class AugmentedUserMessage(
     AugmentedMessageMixin,
     ag_ui.core.UserMessage,
 ):
-    content: Annotated[  # type: ignore[assignment]
-        list[ag_ui_input_content_compat.InputContent],
-        BeforeValidator(
-            _str_to_text_input_content, json_schema_input_type=str | list[ag_ui_input_content_compat.InputContent]
-        ),
+    content: Annotated[
+        list[ag_ui.core.InputContent],
+        BeforeValidator(_str_to_text_input_content, json_schema_input_type=str | list[ag_ui.core.InputContent]),
     ]
 
     @model_validator(mode="before")
@@ -170,28 +112,14 @@ class AugmentedUserMessage(
         if not isinstance(obj, orm.UserMessage):
             return obj
 
-        content: list[ag_ui_input_content_compat.InputContent] = []
+        from _ravnar.file_storage import convert_file_to_input_content
+
+        content: list[ag_ui.core.InputContent] = []
         for ic in obj.input_contents:
             if ic.text is not None:
                 content.append(ag_ui.core.TextInputContent(text=ic.text))
             elif ic.file is not None:
-                content.append(
-                    pydantic.TypeAdapter(RavnarFileInputContent).validate_python(
-                        {
-                            "type": ic.file.type,
-                            "source": InputContentRavnarSource(
-                                value=InputContentRavnarSourceValue(
-                                    file_id=ic.file.id,
-                                    mime_type=ic.file.mime_type,
-                                    source_type=ic.file.source_type,
-                                    source_data=ic.file.source_data,
-                                    created_at=ic.file.created_at,
-                                )
-                            ),
-                            "metadata": ic.file.metadata_,
-                        }
-                    )
-                )
+                content.append(convert_file_to_input_content(ic.file))
             else:
                 raise RuntimeError
 

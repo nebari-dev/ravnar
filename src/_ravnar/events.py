@@ -14,7 +14,7 @@ import jsonpatch
 import pydantic
 import structlog
 
-from _ravnar import schema
+from _ravnar.file_storage import WrappedMetadata
 from _ravnar.observability import LazyValue
 
 from . import orm
@@ -135,7 +135,7 @@ class EventProcessor:
                             file_id = None
                         else:
                             assert isinstance(c.source, ag_ui.core.InputContentDataSource)
-                            metadata = schema.InputContentRavnarMetadata.model_validate(c.metadata)
+                            metadata = WrappedMetadata.model_validate(c.metadata)
                             text = None
                             file_id = metadata.file_id
                         input_contents.append(

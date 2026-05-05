@@ -4,7 +4,8 @@ import base64
 import dataclasses
 import mimetypes
 import uuid
-from typing import TYPE_CHECKING, Any
+from datetime import datetime
+from typing import TYPE_CHECKING, Annotated, Any, Self
 
 import ag_ui.core
 import httpx
@@ -12,7 +13,7 @@ import pydantic
 from fastapi import HTTPException, status
 from upath import UPath
 
-from _ravnar import ag_ui_input_content_compat, orm, schema
+from _ravnar import orm, schema
 from _ravnar.utils import as_awaitable
 
 if TYPE_CHECKING:
@@ -44,6 +45,56 @@ class _FileData:
     source_data: dict[str, Any] | None = None
 
 
+FileInputContent = Annotated[
+    ag_ui.core.ImageInputContent
+    | ag_ui.core.AudioInputContent
+    | ag_ui.core.VideoInputContent
+    | ag_ui.core.DocumentInputContent,
+    pydantic.Field(discriminator="type"),
+]
+
+MIME_TYPE = "application/vnd.ravnar.json-b64"
+
+
+class DataSourceValue(schema.BaseModel):
+    file_id: uuid.UUID
+    mime_type: str
+    source_type: str
+    source_data: dict[str, Any] | None
+    created_at: datetime
+
+    @classmethod
+    def decode(cls, s: str) -> Self:
+        return cls.model_validate_json(base64.b64decode(s))
+
+    def encode(self) -> str:
+        return base64.b64encode(self.model_dump_json(by_alias=True).encode()).decode()
+
+
+def convert_file_to_input_content(file: orm.File) -> FileInputContent:
+    return pydantic.TypeAdapter(ag_ui.core.InputContent).validate_python(
+        {
+            "type": file.type,
+            "source": ag_ui.core.InputContentDataSource(
+                value=DataSourceValue(
+                    file_id=file.id,
+                    mime_type=file.mime_type,
+                    source_type=file.source_type,
+                    source_data=file.source_data,
+                    created_at=file.created_at,
+                ).encode(),
+                mime_type=MIME_TYPE,
+            ),
+            "metadata": file.metadata_,
+        }
+    )
+
+
+class WrappedMetadata(schema.BaseModel):
+    raw: Any
+    file_id: uuid.UUID
+
+
 class FileHandler:
     def __init__(self, *, root: UPath, database: Database) -> None:
         self._storage = _Storage(root)
@@ -55,27 +106,7 @@ class FileHandler:
             "custom": self._extract_custom,
         }
 
-    @staticmethod
-    def _file_to_input_content(file: orm.File) -> schema.RavnarFileInputContent:
-        return pydantic.TypeAdapter(schema.RavnarFileInputContent).validate_python(
-            {
-                "type": file.type,
-                "source": schema.InputContentRavnarSource(
-                    value=schema.InputContentRavnarSourceValue(
-                        file_id=file.id,
-                        mime_type=file.mime_type,
-                        source_type=file.source_type,
-                        source_data=file.source_data,
-                        created_at=file.created_at,
-                    )
-                ),
-                "metadata": file.metadata_,
-            }
-        )
-
-    async def add(
-        self, file_input_content: schema.FileInputContent, *, user_id: str
-    ) -> tuple[schema.RavnarFileInputContent, bytes]:
+    async def add(self, file_input_content: FileInputContent, *, user_id: str) -> tuple[orm.File, bytes]:
         source_type = file_input_content.source.type
         if source_type not in self._extractors:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported file source type")
@@ -93,27 +124,23 @@ class FileHandler:
         await self._storage.write(file.id, data.content)
         await self._database.add_file(file)
 
-        return self._file_to_input_content(file), data.content
+        return file, data.content
 
-    async def add_or_read(
-        self, file_input_content: schema.FileInputContent, *, user_id: str
-    ) -> tuple[schema.RavnarFileInputContent, bytes]:
+    async def add_or_read(self, file_input_content: FileInputContent, *, user_id: str) -> tuple[orm.File, bytes]:
         if (
-            isinstance(file_input_content.source, ag_ui_input_content_compat.InputContentCustomSource)
-            and file_input_content.source.name == "ravnar"
+            isinstance(file_input_content.source, ag_ui.core.InputContentDataSource)
+            and file_input_content.source.mime_type == MIME_TYPE
         ):
-            ta = pydantic.TypeAdapter[schema.RavnarFileInputContent](schema.RavnarFileInputContent)
-            rfic = ta.validate_python(file_input_content, from_attributes=True)
-            if rfic is file_input_content:
-                rfic = rfic.model_copy()
-            _, content = await self.read(rfic.source.value.file_id, user_id=user_id)
+            value = DataSourceValue.decode(file_input_content.source.value)
+            file = await self.get(value.file_id, user_id=user_id)
+            content = await self._storage.read(file.id)
         else:
-            rfic, content = await self.add(file_input_content, user_id=user_id)
+            file, content = await self.add(file_input_content, user_id=user_id)
 
-        return rfic, content
+        return file, content
 
     @staticmethod
-    async def _extract_data(file_input_content: schema.FileInputContent) -> _FileData:
+    async def _extract_data(file_input_content: FileInputContent) -> _FileData:
         assert isinstance(file_input_content.source, ag_ui.core.InputContentDataSource)
 
         return _FileData(
@@ -122,7 +149,7 @@ class FileHandler:
         )
 
     @staticmethod
-    async def _extract_url(file_input_content: schema.FileInputContent) -> _FileData:
+    async def _extract_url(file_input_content: FileInputContent) -> _FileData:
         assert isinstance(file_input_content.source, ag_ui.core.InputContentUrlSource)
 
         url = file_input_content.source.value
@@ -144,18 +171,17 @@ class FileHandler:
         return _FileData(content=content, mime_type=mime_type, source_data={"url": url})
 
     @staticmethod
-    async def _extract_custom(file_input_content: schema.FileInputContent) -> _FileData:
+    async def _extract_custom(file_input_content: FileInputContent) -> _FileData:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Custom file source type is not supported"
         )
 
-    async def get(self, id: uuid.UUID, *, user_id: str) -> schema.RavnarFileInputContent:
-        file = await self._database.get_file(id=id, user_id=user_id)
-        return self._file_to_input_content(file)
+    async def get(self, id: uuid.UUID, *, user_id: str) -> orm.File:
+        return await self._database.get_file(id=id, user_id=user_id)
 
     async def read(self, id: uuid.UUID, *, user_id: str) -> tuple[str, bytes]:
         file = await self._database.get_file(id=id, user_id=user_id)
-        content = await self._storage.read(id)
+        content = await self._storage.read(file.id)
         return file.mime_type, content
 
     async def delete(self, id: uuid.UUID, *, user_id: str) -> None:
