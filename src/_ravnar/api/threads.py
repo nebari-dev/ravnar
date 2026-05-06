@@ -12,12 +12,12 @@ import pydantic
 from fastapi import Depends, HTTPException, Path, Query, status
 
 from _ravnar import schema
+from _ravnar.file_storage import FileHandler, WrappedMetadata
 from _ravnar.utils import as_awaitable, now
 
 if TYPE_CHECKING:
     from _ravnar.database import Database
     from _ravnar.events import EventProcessor
-    from _ravnar.file_storage import FileHandler
 
     from . import AgentHandler
 
@@ -100,15 +100,12 @@ def make_router(
                         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Binary input content is not supported"
                     )
 
-                rfic, content = await file_handler.add_or_read(input_content, user_id=user.id)
-
+                file, content = await file_handler.add_or_read(input_content, user_id=user.id)
                 input_content.source = ag_ui.core.InputContentDataSource(
                     value=await as_awaitable(lambda c: base64.b64encode(c).decode(), content),
-                    mime_type=rfic.source.value.mime_type,
+                    mime_type=file.mime_type,
                 )
-                input_content.metadata = schema.InputContentRavnarMetadata(
-                    raw=input_content.metadata, file_id=rfic.source.value.file_id
-                )
+                input_content.metadata = WrappedMetadata(raw=input_content.metadata, file_id=file.id)
 
         run_agent_input = ag_ui.core.RunAgentInput(
             thread_id=thread.id,
