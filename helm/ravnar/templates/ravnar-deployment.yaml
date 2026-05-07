@@ -113,5 +113,5 @@ spec:
         {{- if .Values.persistentFileStorage.enabled }}
         - name: persistent-file-storage
           persistentVolumeClaim:
-            claimName: {{ .Release.Name }}-persistent-file-storage
+            claimName: {{ include "ravnar.component-name" (dict "top" . "component" "persistent-file-storage") }}
         {{- end }}
