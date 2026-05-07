@@ -8,7 +8,7 @@ metadata:
   labels:
     {{- include "ravnar.labels" (dict "top" . "component" $component) | nindent 4 }}
 spec:
-  serviceName: {{ printf "%s-%s" .Release.Name $component }}
+  serviceName: {{ include "ravnar.component-name" (dict "top" . "component" $component) }}
   replicas: 1
   selector:
     matchLabels:
