@@ -110,15 +110,15 @@ class OIDCTokenValidator:
 
         try:
             payload = jwt.decode(token, self._jwks_client.get_signing_key_from_jwt(token).key, **self._decode_kwargs)
-        except jwt.ExpiredSignatureError:
-            raise
-        except jwt.InvalidTokenError:
-            raise
+        except jwt.ExpiredSignatureError as exc:
+            raise HTTPException(detail="JWT expired", status_code=status.HTTP_401_UNAUTHORIZED) from exc
+        except jwt.InvalidTokenError as exc:
+            raise HTTPException(detail="JWT invalid", status_code=status.HTTP_401_UNAUTHORIZED) from exc
 
         try:
             oidc_user = OIDCUser.model_validate(payload)
-        except pydantic.ValidationError:
-            raise
+        except pydantic.ValidationError as exc:
+            raise HTTPException(detail="JWT payload invalid", status_code=status.HTTP_401_UNAUTHORIZED) from exc
 
         return schema.User(id=oidc_user.sub, data=oidc_user.model_dump(exclude={"sub"}))
 
