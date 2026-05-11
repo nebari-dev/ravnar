@@ -1,6 +1,6 @@
 {{- if .Values.postgres.enabled -}}
 {{- $component := "postgres" }}
-{{- $secretName := ternary .Values.postgres.auth.existingSecret (include "ravnar.component-name" (dict "top" . "component" $component)) .Values.postgres.auth.existingSecret }}
+{{- $secretName := .Values.postgres.auth.existingSecret | default (include "ravnar.component-name" (dict "top" . "component" $component)) }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:

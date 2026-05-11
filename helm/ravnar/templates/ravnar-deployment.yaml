@@ -55,7 +55,7 @@ spec:
             {{- end }}
             {{- if .Values.postgres.enabled }}
             {{- $message := "Set postgres.enabled=false if you must override." }}
-            {{- $secretName := ternary .Values.postgres.auth.existingSecret (include "ravnar.component-name" (dict "top" . "component" "postgres")) .Values.postgres.auth.existingSecret }}
+            {{- $secretName := .Values.postgres.auth.existingSecret | default (include "ravnar.component-name" (dict "top" . "component" "postgres")) }}
             {{- range $secretKey := list "username" "password" "host" "port" "database" }}
             {{- $name := printf "POSTGRES_%s" (upper $secretKey) -}}
             {{- include "ravnar.env.checkAndSet" (dict
