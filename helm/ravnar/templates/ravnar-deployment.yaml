@@ -55,8 +55,8 @@ spec:
             {{- end }}
             {{- if .Values.postgres.enabled }}
             {{- $message := "Set postgres.enabled=false if you must override." }}
-            {{- $secretName := include "ravnar.component-name" (dict "top" . "component" "postgres") }}
-            {{- range $secretKey := list "username" "password" "resource" }}
+            {{- $secretName := .Values.postgres.auth.existingSecret | default (include "ravnar.component-name" (dict "top" . "component" "postgres")) }}
+            {{- range $secretKey := list "username" "password" "host" "port" "database" }}
             {{- $name := printf "POSTGRES_%s" (upper $secretKey) -}}
             {{- include "ravnar.env.checkAndSet" (dict
               "envMap"  $envMap
@@ -68,10 +68,12 @@ spec:
             {{- include "ravnar.env.checkAndSet" (dict
               "envMap"  $envMap
               "name"    "RAVNAR_STORAGE__DATABASE_DSN"
-              "value"   (dict "value" (printf "postgresql+psycopg://%s:%s@%s"
+              "value"   (dict "value" (printf "postgresql+psycopg://%s:%s@%s:%s/%s"
                           (include "ravnar.env.templateLiteral" "POSTGRES_USERNAME")
                           (include "ravnar.env.templateLiteral" "POSTGRES_PASSWORD")
-                          (include "ravnar.env.templateLiteral" "POSTGRES_RESOURCE")
+                          (include "ravnar.env.templateLiteral" "POSTGRES_HOST")
+                          (include "ravnar.env.templateLiteral" "POSTGRES_PORT")
+                          (include "ravnar.env.templateLiteral" "POSTGRES_DATABASE")
                         ))
               "message" $message
             ) -}}
