@@ -1,5 +1,6 @@
 {{- if .Values.postgres.enabled -}}
 {{- $component := "postgres" }}
+{{- $secretName := ternary .Values.postgres.auth.existingSecret (include "ravnar.component-name" (dict "top" . "component" $component)) .Values.postgres.auth.existingSecret }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -38,17 +39,17 @@ spec:
             - name: POSTGRES_USER
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "ravnar.component-name" (dict "top" . "component" $component) }}
+                  name: {{ $secretName }}
                   key: username
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "ravnar.component-name" (dict "top" . "component" $component) }}
+                  name: {{ $secretName }}
                   key: password
             - name: POSTGRES_DB
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "ravnar.component-name" (dict "top" . "component" $component) }}
+                  name: {{ $secretName }}
                   key: database
           volumeMounts:
             - name: data
