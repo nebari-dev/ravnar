@@ -94,10 +94,7 @@
           "type": "string"
         },
         "password": {
-          "anyOf": [
-            { "type": "object", "maxProperties": 0 },
-            { "$ref": "#/$defs/envEntry" }
-          ]
+          "anyOf": [{ "type": "object", "maxProperties": 0 }, { "$ref": "#/$defs/envEntry" }]
         }
       }
     }
