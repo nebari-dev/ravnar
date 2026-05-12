@@ -92,6 +92,12 @@
         },
         "storage": {
           "type": "string"
+        },
+        "password": {
+          "anyOf": [
+            { "type": "object", "maxProperties": 0 },
+            { "$ref": "#/$defs/envEntry" }
+          ]
         }
       }
     }
@@ -165,42 +171,45 @@
       },
       "additionalProperties": false
     },
+    "envEntry": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "string"
+        },
+        "valueFrom": {
+          "type": "object",
+          "properties": {
+            "secretKeyRef": {
+              "type": "object",
+              "required": ["name", "key"],
+              "properties": {
+                "name": { "type": "string" },
+                "key": { "type": "string" },
+                "optional": { "type": "boolean" }
+              }
+            },
+            "configMapKeyRef": {
+              "type": "object",
+              "required": ["name", "key"],
+              "properties": {
+                "name": { "type": "string" },
+                "key": { "type": "string" },
+                "optional": { "type": "boolean" }
+              }
+            },
+            "fieldRef": { "type": "object" },
+            "resourceFieldRef": { "type": "object" }
+          }
+        }
+      },
+      "oneOf": [{ "required": ["value"] }, { "required": ["valueFrom"] }],
+      "errorMessage": "Each entry must have either a 'value' or a 'valueFrom' field."
+    },
     "envMap": {
       "type": "object",
       "additionalProperties": {
-        "type": "object",
-        "properties": {
-          "value": {
-            "type": "string"
-          },
-          "valueFrom": {
-            "type": "object",
-            "properties": {
-              "secretKeyRef": {
-                "type": "object",
-                "required": ["name", "key"],
-                "properties": {
-                  "name": { "type": "string" },
-                  "key": { "type": "string" },
-                  "optional": { "type": "boolean" }
-                }
-              },
-              "configMapKeyRef": {
-                "type": "object",
-                "required": ["name", "key"],
-                "properties": {
-                  "name": { "type": "string" },
-                  "key": { "type": "string" },
-                  "optional": { "type": "boolean" }
-                }
-              },
-              "fieldRef": { "type": "object" },
-              "resourceFieldRef": { "type": "object" }
-            }
-          }
-        },
-        "oneOf": [{ "required": ["value"] }, { "required": ["valueFrom"] }],
-        "errorMessage": "Each entry must have either a 'value' or a 'valueFrom' field."
+        "$ref": "#/$defs/envEntry"
       }
     },
     "service": {

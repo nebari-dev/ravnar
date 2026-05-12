@@ -102,3 +102,7 @@ postgres:
       memory: 512Mi
   # -- The size of the persistent storage for PostgreSQL
   storage: 1Gi
+  # -- PostgreSQL password. Follows the same format as extraEnv entries.
+  # If unset, the chart generates a random password and persists it with lookup.
+  # Set to { value: "..." } or { valueFrom: { secretKeyRef: { ... } } } to provide your own.
+  password: {}

@@ -40,11 +40,9 @@ spec:
                 secretKeyRef:
                   name: {{ include "ravnar.component-name" (dict "top" . "component" $component) }}
                   key: username
+            {{- $passwordEnv := ternary .Values.postgres.password (dict "valueFrom" (dict "secretKeyRef" (dict "name" (include "ravnar.component-name" (dict "top" . "component" $component)) "key" "password"))) (not (empty .Values.postgres.password)) }}
             - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "ravnar.component-name" (dict "top" . "component" $component) }}
-                  key: password
+              {{- toYaml $passwordEnv | nindent 14 }}
             - name: POSTGRES_DB
               valueFrom:
                 secretKeyRef:
