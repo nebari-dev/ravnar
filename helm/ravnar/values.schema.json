@@ -92,14 +92,6 @@
         },
         "storage": {
           "type": "string"
-        },
-        "auth": {
-          "type": "object",
-          "properties": {
-            "existingSecret": {
-              "type": "string"
-            }
-          }
         }
       }
     }
