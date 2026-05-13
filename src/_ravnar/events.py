@@ -220,10 +220,7 @@ class EventProcessor:
                     )
                 self._progress = RunProgress.STARTED
             case ag_ui.core.RunFinishedEvent():
-                if (
-                    event.thread_id != self._run_agent_input.thread_id
-                    or event.run_id != self._run_agent_input.run_id
-                ):
+                if event.thread_id != self._run_agent_input.thread_id or event.run_id != self._run_agent_input.run_id:
                     logger.warn(
                         "event",
                         state="overridden",
@@ -362,6 +359,7 @@ class EventProcessor:
                 message = self._messages.get(event.message_id)
                 if message is None:
                     message = self._parent_messages.get(event.message_id)
+                    assert isinstance(message, orm.ActivityMessage)
                     if message is None:
                         logger.error(
                             "event",

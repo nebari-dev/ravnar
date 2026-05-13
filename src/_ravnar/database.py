@@ -287,7 +287,7 @@ class Database(SetupTeardownMixin):
         )
 
         result = await session.execute(query)
-        return result.unique().scalars().all()
+        return list(result.unique().scalars().all())
 
     async def get_thread_history(
         self, *, user_id: str, thread_id: str, run_id: str | None
