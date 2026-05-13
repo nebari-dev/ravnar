@@ -2625,7 +2625,6 @@ wheels = [
 
 [[package]]
 name = "ravnar"
-version = "0.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "ag-ui-protocol" },
@@ -2736,9 +2735,11 @@ test = [
 requires-dist = [
     { name = "ag-ui-protocol", specifier = "==0.1.18" },
     { name = "agno", marker = "extra == 'agno'", specifier = ">=2.5.2,<3" },
+    { name = "agno", marker = "extra == 'all'", specifier = ">=2.5.2,<3" },
     { name = "fastapi" },
     { name = "fastsse", specifier = "==0.0.2" },
     { name = "httpx", specifier = ">=0.28" },
+    { name = "httpx-sse", marker = "extra == 'all'", specifier = ">=0.4.0,<0.5" },
     { name = "httpx-sse", marker = "extra == 'sse'", specifier = ">=0.4.0,<0.5" },
     { name = "jinja2" },
     { name = "jsonpatch", specifier = ">=1.33,<2" },
@@ -2748,22 +2749,26 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-fastapi", specifier = ">=0.60b0" },
     { name = "opentelemetry-instrumentation-sqlalchemy", specifier = ">=0.60b0" },
     { name = "opentelemetry-sdk", specifier = ">=1.39.0" },
+    { name = "psycopg", extras = ["binary", "pool"], marker = "extra == 'all'", specifier = ">=3.2.9,<4" },
     { name = "psycopg", extras = ["binary", "pool"], marker = "extra == 'serve'", specifier = ">=3.2.9,<4" },
     { name = "pydantic", specifier = ">=2.13" },
+    { name = "pydantic-ai-slim", extras = ["ag-ui"], marker = "extra == 'all'", specifier = ">=1.79,<2" },
     { name = "pydantic-ai-slim", extras = ["ag-ui"], marker = "extra == 'pydantic-ai'", specifier = ">=1.79,<2" },
     { name = "pydantic-core" },
     { name = "pydantic-settings", extras = ["yaml"], specifier = ">=2.13" },
+    { name = "pyjwt", marker = "extra == 'all'", specifier = ">=2,<3" },
     { name = "pyjwt", marker = "extra == 'oidc'", specifier = ">=2,<3" },
-    { name = "ravnar", extras = ["serve", "pydantic-ai", "agno", "sse", "oidc"], marker = "extra == 'all'" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2" },
     { name = "starlette" },
     { name = "structlog", specifier = ">=25.4.0" },
     { name = "typer" },
     { name = "universal-pathlib", specifier = ">=0.3.4" },
+    { name = "uvicorn", marker = "extra == 'all'" },
     { name = "uvicorn", marker = "extra == 'serve'" },
+    { name = "uvloop", marker = "sys_platform != 'win32' and extra == 'all'" },
     { name = "uvloop", marker = "sys_platform != 'win32' and extra == 'serve'" },
 ]
-provides-extras = ["serve", "pydantic-ai", "agno", "sse", "oidc", "all"]
+provides-extras = ["agno", "all", "oidc", "pydantic-ai", "serve", "sse"]
 
 [package.metadata.requires-dev]
 dev = [
