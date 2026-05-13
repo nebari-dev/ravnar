@@ -16,7 +16,7 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from _ravnar import schema
 from _ravnar.events import EventProcessor
 from _ravnar.file_storage import FileHandler
-from _ravnar.observability import configure_logging, configure_tracing
+from _ravnar.observability import configure_logging, configure_tracing, traced
 from _ravnar.utils import resolve_forward_references
 
 from .api import make_router as make_api_router
@@ -68,9 +68,7 @@ class Ravnar:
         else:
             authenticator = config.security.authenticator()
 
-            authenticated_user = tracer.start_as_current_span("authenticate")(
-                resolve_forward_references(authenticator.authenticate)
-            )
+            authenticated_user = traced(resolve_forward_references(authenticator.authenticate), name="authenticate")
 
         @app.get("/", include_in_schema=False)
         async def base_redirect() -> RedirectResponse:

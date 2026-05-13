@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import contextlib
 import functools
+import inspect
 import json
 import types
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar, cast
+from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar, cast, overload
 
 import anyio
 import fastapi
@@ -87,14 +89,15 @@ class LazyValue:
         return {k: v() if isinstance(v, LazyValue) else v for k, v in event_dict.items()}
 
 
-def traced(fn: Callable[P, T]) -> Callable[P, T]:
-    name = f"{fn.__qualname__}"
+def _traced(fn: Callable[P, T], *, name: str | None) -> Callable[P, T]:
+    if name is None:
+        name = f"{fn.__qualname__}"
 
-    @functools.wraps(fn)
-    async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+    @contextlib.contextmanager
+    def traced() -> Iterator[None]:
         with tracer.start_as_current_span(name):
             try:
-                return cast(T, await fn(*args, **kwargs))
+                yield
             except HTTPException as exc:
                 span = trace.get_current_span()
                 span.add_event(
@@ -103,7 +106,44 @@ def traced(fn: Callable[P, T]) -> Callable[P, T]:
                 )
                 raise
 
-    return cast(Callable[P, T], async_wrapper)
+    if inspect.iscoroutinefunction(fn):
+
+        @functools.wraps(fn)
+        async def async_fn_wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+            with traced():
+                return await fn(*args, **kwargs)  # type: ignore[no-any-return]
+
+        return async_fn_wrapper  # type: ignore[return-value]
+
+    @functools.wraps(fn)
+    def sync_fn_wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+        with traced():
+            return fn(*args, **kwargs)
+
+    return sync_fn_wrapper
+
+
+@overload
+def traced(fn: Callable[P, T], /) -> Callable[P, T]: ...
+
+
+@overload
+def traced(fn: Callable[P, T], /, *, name: str | None = None) -> Callable[P, T]: ...
+
+
+@overload
+def traced(*, name: str | None = None) -> Callable[[Callable[P, T]], Callable[P, T]]: ...
+
+
+def traced(
+    fn: Callable[P, T] | None = None, /, *, name: str | None = None
+) -> Callable[P, T] | Callable[[Callable[P, T]], Callable[P, T]]:
+    def decorator(fn: Callable[P, T]) -> Callable[P, T]:
+        return _traced(fn, name=name)
+
+    if fn is None:
+        return decorator
+    return decorator(fn)
 
 
 def configure_logging(config: BaseConfig) -> None:
