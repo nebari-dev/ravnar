@@ -9,9 +9,9 @@ metadata:
   labels:
     {{- include "ravnar.labels" (dict "top" . "component" $component) | nindent 4 }}
 spec:
-  ingressClassName: {{ .Values.ingress.className }}
+  ingressClassName: {{ tpl .Values.ingress.className . }}
   rules:
-    - host: {{ .Values.ingress.hostname}}
+    - host: {{ tpl .Values.ingress.hostname . }}
       http:
         paths:
           - path: /
@@ -33,7 +33,7 @@ spec:
   entryPoints:
     - web
   routes:
-    - match: Host(`{{ .Values.ingress.hostname }}`)
+    - match: Host(`{{ tpl .Values.ingress.hostname . }}`)
       kind: Rule
       services:
         - name: {{ include "ravnar.fullname" . }}
