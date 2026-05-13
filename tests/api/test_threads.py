@@ -30,8 +30,6 @@ class TestThreadsCRUD:
             assert thread.id == id
         assert thread.name == name
         assert thread.agent_id == agent_id
-        assert thread.updated_at == thread.created_at
-
         expected = thread
         response = app_client.get(f"/api/threads/{thread.id}").raise_for_status()
         actual = schema.Thread.model_validate_json(response.content)
@@ -263,7 +261,7 @@ class TestThreadsCreateRun:
         with httpx_sse.connect_sse(
             client,
             "POST",
-            f"/api/threads/{thread_id}/run",
+            f"/api/threads/{thread_id}/runs",
             json=schema.CreateRunData.model_validate(data).model_dump(mode="json", by_alias=True, exclude_unset=True),
             **kwargs,
         ) as event_source:
@@ -330,3 +328,99 @@ class TestThreadsCreateRun:
         list(event_stream)
 
         app_client.get(f"/api/threads/{thread_id}/messages").raise_for_status()
+
+    def test_run_crud(self, app_client):
+        thread_id = self.create_thread(app_client).id
+        run_id = "run-1"
+
+        event_stream = self.create_run(
+            app_client,
+            thread_id=thread_id,
+            data={"id": run_id, "messages": [{"role": "user", "content": [{"type": "text", "text": "hello"}]}]},
+        )
+        list(event_stream)
+
+        # List runs
+        response = app_client.get(f"/api/threads/{thread_id}/runs").raise_for_status()
+        runs_page = schema.Page[schema.Run].model_validate_json(response.content)
+        assert len(runs_page.items) == 1
+        assert runs_page.items[0].id == run_id
+
+        # Get run
+        response = app_client.get(f"/api/threads/{thread_id}/runs/{run_id}").raise_for_status()
+        run = schema.Run.model_validate_json(response.content)
+        assert run.id == run_id
+        assert run.thread_id == thread_id
+        assert run.parent_run_id is None
+
+        # Get run messages
+        response = app_client.get(f"/api/threads/{thread_id}/runs/{run_id}/messages").raise_for_status()
+        messages = pydantic.TypeAdapter(list[schema.AugmentedMessage]).validate_json(response.content)
+        assert len(messages) == 2  # user message + assistant response
+
+        # Backward compat thread messages returns latest run snapshot
+        response = app_client.get(f"/api/threads/{thread_id}/messages").raise_for_status()
+        thread_messages = pydantic.TypeAdapter(list[schema.AugmentedMessage]).validate_json(response.content)
+        assert len(thread_messages) == 2
+
+    def test_child_run(self, app_client):
+        thread_id = self.create_thread(app_client).id
+        run1_id = "run-1"
+        run2_id = "run-2"
+
+        event_stream = self.create_run(
+            app_client,
+            thread_id=thread_id,
+            data={"id": run1_id, "messages": [{"role": "user", "content": [{"type": "text", "text": "hello"}]}]},
+        )
+        list(event_stream)
+
+        # Create child run with explicit parent_run_id
+        event_stream = self.create_run(
+            app_client,
+            thread_id=thread_id,
+            data={
+                "id": run2_id,
+                "parentRunId": run1_id,
+                "messages": [{"role": "user", "content": [{"type": "text", "text": "follow up"}]}],
+            },
+        )
+        list(event_stream)
+
+        response = app_client.get(f"/api/threads/{thread_id}/runs/{run2_id}").raise_for_status()
+        run2 = schema.Run.model_validate_json(response.content)
+        assert run2.parent_run_id == run1_id
+
+        # Run2 messages include run1 messages + new ones
+        response = app_client.get(f"/api/threads/{thread_id}/runs/{run2_id}/messages").raise_for_status()
+        messages = pydantic.TypeAdapter(list[schema.AugmentedMessage]).validate_json(response.content)
+        assert len(messages) == 4  # run1 user+assistant, run2 user+assistant
+
+        # Run1 messages unchanged
+        response = app_client.get(f"/api/threads/{thread_id}/runs/{run1_id}/messages").raise_for_status()
+        messages1 = pydantic.TypeAdapter(list[schema.AugmentedMessage]).validate_json(response.content)
+        assert len(messages1) == 2
+
+    def test_invalid_parent_run_id(self, app_client):
+        thread1_id = self.create_thread(app_client).id
+        thread2_id = self.create_thread(app_client).id
+        run_id = "run-1"
+
+        event_stream = self.create_run(
+            app_client,
+            thread_id=thread1_id,
+            data={"id": run_id, "messages": [{"role": "user", "content": [{"type": "text", "text": "hello"}]}]},
+        )
+        list(event_stream)
+
+        # Try to use run from thread1 as parent for thread2
+        with httpx_sse.connect_sse(
+            app_client,
+            "POST",
+            f"/api/threads/{thread2_id}/runs",
+            json=schema.CreateRunData(
+                messages=[{"role": "user", "content": [{"type": "text", "text": "hello"}]}],
+                parent_run_id=run_id,
+            ).model_dump(mode="json", by_alias=True),
+        ) as event_source:
+            assert event_source.response.status_code == 422

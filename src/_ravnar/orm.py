@@ -111,12 +111,30 @@ class Thread(Base, kw_only=True, repr=False):
     name: Mapped[str | None]
 
     created_at: Mapped[datetime] = mapped_column(UtcAwareDateTime)
-    updated_at: Mapped[datetime] = mapped_column(UtcAwareDateTime)
 
-    state: Mapped[State] = mapped_column(Json, nullable=True)
+    runs: Mapped[list[Run]] = relationship(
+        "Run",
+        back_populates="thread",
+        cascade="all, delete-orphan",
+        order_by="Run.created_at.asc()",
+    )
+
+
+class Run(Base, kw_only=True, repr=False):
+    __tablename__ = "runs"
+
+    id: Mapped[str] = mapped_column(primary_key=True)
+    thread_id: Mapped[str] = mapped_column(ForeignKey("threads.id", ondelete="CASCADE"), index=True)
+    thread: Mapped[Thread] = relationship("Thread", back_populates="runs", init=False)
+    parent_run_id: Mapped[str | None] = mapped_column(
+        ForeignKey("runs.id", ondelete="CASCADE"), index=True, default=None
+    )
+    created_at: Mapped[datetime] = mapped_column(UtcAwareDateTime, default_factory=now)
+    state: Mapped[State] = mapped_column(Json, nullable=True, default=None)
+
     messages: Mapped[list[Message]] = relationship(
         "Message",
-        back_populates="thread",
+        back_populates="run",
         cascade="all, delete-orphan",
         order_by="[Message.created_at.asc(), Message.id]",
     )
@@ -125,13 +143,12 @@ class Thread(Base, kw_only=True, repr=False):
 class Message(Base, kw_only=True, repr=False):
     __tablename__ = "messages"
 
-    id: Mapped[str] = mapped_column(primary_key=True)
+    uid: Mapped[uuid.UUID] = mapped_column(types.Uuid, primary_key=True, default_factory=uuid.uuid4)
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
+    run: Mapped[Run] = relationship("Run", back_populates="messages", init=False)
 
-    thread_id: Mapped[str] = mapped_column(ForeignKey("threads.id"), index=True)
-    thread: Mapped[Thread] = relationship(init=False)
-
+    id: Mapped[str] = mapped_column(index=True)
     created_at: Mapped[datetime] = mapped_column(UtcAwareDateTime)
-    updated_at: Mapped[datetime | None] = mapped_column(UtcAwareDateTime, default=None)
 
     role: Mapped[ag_ui.core.Role] = mapped_column(
         types.Enum(*get_args(ag_ui.core.Role), name="message_role", native_enum=False)
@@ -220,7 +237,7 @@ class ReasoningMessage(Message, kw_only=True, repr=False):
 class InputContent(Base, kw_only=True, repr=False):
     __tablename__ = "input_contents"
 
-    user_message_id: Mapped[str] = mapped_column(ForeignKey("messages.id"), primary_key=True)
+    user_message_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("messages.uid", ondelete="CASCADE"), primary_key=True)
     user_message: Mapped[UserMessage] = relationship("UserMessage", init=False, back_populates="input_contents")
     index: Mapped[int] = mapped_column(primary_key=True)
 
@@ -235,12 +252,14 @@ class ToolCall(Base, kw_only=True, repr=False):
 
     id: Mapped[str] = mapped_column(primary_key=True)
 
-    assistant_message_id: Mapped[str] = mapped_column(ForeignKey("messages.id", ondelete="CASCADE"), index=True)
+    assistant_message_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("messages.uid", ondelete="CASCADE"), index=True)
     assistant_message: Mapped[AssistantMessage] = relationship(
         init=False, back_populates="tool_calls", foreign_keys=[assistant_message_id]
     )
 
-    tool_message_id: Mapped[str | None] = mapped_column(ForeignKey("messages.id", ondelete="CASCADE"), index=True)
+    tool_message_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("messages.uid", ondelete="CASCADE"), index=True
+    )
     tool_message: Mapped[ToolMessage | None] = relationship(
         init=False, back_populates="tool_call", foreign_keys=[tool_message_id]
     )

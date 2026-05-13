@@ -136,7 +136,6 @@ class EventProcessingCases:
                     activity_type=activity_type,
                     content={"baz": "boo", "hello": ["world"]},
                     created_at=parse_timestamp(snapshot_timestamp),
-                    updated_at=parse_timestamp(last_patch_timestamp),
                 )
             ],
         )

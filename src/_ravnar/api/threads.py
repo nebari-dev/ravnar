@@ -1,19 +1,17 @@
 from __future__ import annotations
 
 import base64
-import uuid
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Annotated, Any
 
 import ag_ui.core
-import ag_ui.encoder
 import fastsse
 import pydantic
 from fastapi import Depends, HTTPException, Path, Query, status
 
 from _ravnar import schema
 from _ravnar.file_storage import FileHandler, WrappedMetadata
-from _ravnar.utils import as_awaitable, now
+from _ravnar.utils import as_awaitable
 
 if TYPE_CHECKING:
     from _ravnar.database import Database
@@ -22,8 +20,10 @@ if TYPE_CHECKING:
     from . import AgentHandler
 
     ThreadsSortBy = str
+    RunsSortBy = str
 else:
-    ThreadsSortBy = schema.create_str_literal("created_at", "updated_at", default="created_at")
+    ThreadsSortBy = schema.create_str_literal("created_at", default="created_at")
+    RunsSortBy = schema.create_str_literal("created_at", default="created_at")
 
 
 def make_router(
@@ -69,23 +69,75 @@ def make_router(
         id: Annotated[str, Path(alias="threadId")],
         user: schema.User = Depends(authenticated_user),  # noqa: B008
     ) -> list[schema.AugmentedMessage]:
-        thread = await database.get_thread(user_id=user.id, id=id, with_messages=True)
-        return pydantic.TypeAdapter(list[schema.AugmentedMessage]).validate_python(
-            thread.messages, from_attributes=True
+        latest_run = await database.get_latest_run(thread_id=id)
+        if latest_run is None:
+            return []
+        messages = await database.get_run_messages(run_id=latest_run.id)
+        return pydantic.TypeAdapter(list[schema.AugmentedMessage]).validate_python(messages, from_attributes=True)
+
+    @router.get("/{threadId}/runs")
+    async def get_runs(
+        *,
+        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        thread_id: Annotated[str, Path(alias="threadId")],
+        pagination: Annotated[schema.Pagination[RunsSortBy], Query()],
+    ) -> schema.Page[schema.Run]:
+        return schema.Page[schema.Run].model_validate(
+            await database.get_runs(user_id=user.id, thread_id=thread_id, pagination=pagination),
+            from_attributes=True,
         )
 
-    @router.sse("/{threadId}/run", methods=["POST"], response_model=schema.Event, tags=["Runs"])
+    @router.get("/{threadId}/runs/{runId}")
+    async def get_run(
+        *,
+        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        thread_id: Annotated[str, Path(alias="threadId")],
+        run_id: Annotated[str, Path(alias="runId")],
+    ) -> schema.Run:
+        return schema.Run.model_validate(await database.get_run(id=run_id, user_id=user.id), from_attributes=True)
+
+    @router.get("/{threadId}/runs/{runId}/messages")
+    async def get_run_messages(
+        *,
+        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        thread_id: Annotated[str, Path(alias="threadId")],
+        run_id: Annotated[str, Path(alias="runId")],
+    ) -> list[schema.AugmentedMessage]:
+        messages = await database.get_run_messages(run_id=run_id)
+        return pydantic.TypeAdapter(list[schema.AugmentedMessage]).validate_python(messages, from_attributes=True)
+
+    @router.sse("/{threadId}/runs", methods=["POST"], response_model=schema.Event, tags=["Runs"])
     async def create_run(
         *,
         user: schema.User = Depends(authenticated_user),  # noqa: B008
         thread_id: Annotated[str, Path(alias="threadId")],
         data: schema.CreateRunData,
     ) -> fastsse.Response:
-        thread = await database.get_thread(user_id=user.id, id=thread_id, with_messages=True)
+        thread = await database.get_thread(user_id=user.id, id=thread_id)
 
-        messages = pydantic.TypeAdapter(list[schema.AugmentedMessage]).validate_python(
-            thread.messages, from_attributes=True
-        )
+        parent_run_id = data.parent_run_id
+        if parent_run_id is not None:
+            parent_run = await database.get_run(id=parent_run_id, user_id=user.id)
+            if parent_run.thread_id != thread_id:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="parent_run_id does not belong to this thread",
+                )
+        else:
+            latest_run = await database.get_latest_run(thread_id=thread_id)
+            parent_run_id = latest_run.id if latest_run is not None else None
+
+        parent_messages: list[schema.AugmentedMessage] = []
+        parent_state = None
+        if parent_run_id is not None:
+            orm_messages = await database.get_run_messages(run_id=parent_run_id)
+            parent_messages = pydantic.TypeAdapter(list[schema.AugmentedMessage]).validate_python(
+                orm_messages, from_attributes=True
+            )
+            parent_run = await database.get_run(id=parent_run_id, user_id=user.id)
+            parent_state = parent_run.state
+
+        messages = list(parent_messages)
         messages.extend(data.messages)
 
         for m in messages:
@@ -107,11 +159,13 @@ def make_router(
                 )
                 input_content.metadata = WrappedMetadata(raw=input_content.metadata, file_id=file.id)
 
+        client_message_ids = {m.id for m in data.messages}
+
         run_agent_input = ag_ui.core.RunAgentInput(
             thread_id=thread.id,
-            run_id=str(uuid.uuid4()),
-            parent_run_id=None,
-            state=thread.state,
+            run_id=data.id,
+            parent_run_id=parent_run_id,
+            state=parent_state,
             messages=[pydantic.TypeAdapter(ag_ui.core.Message).validate_python(m.model_dump()) for m in messages],
             tools=data.tools,
             context=data.context,
@@ -119,9 +173,12 @@ def make_router(
         )
 
         async def callback(event_processor: EventProcessor) -> None:
-            thread.state, thread.messages = event_processor.extract()
-            thread.updated_at = now()
-            await database.update_thread(thread)
+            # Client-supplied messages are part of this run's delta, not inherited
+            for msg_id in client_message_ids:
+                if msg_id in event_processor._parent_messages:
+                    event_processor._messages[msg_id] = event_processor._parent_messages.pop(msg_id)
+            run = event_processor.extract()
+            await database.create_run(run=run)
 
         return await agent_handler.run(thread.agent_id, run_agent_input, callback=callback)
 

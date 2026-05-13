@@ -74,21 +74,15 @@ class ReasoningData:
 
 
 class EventProcessor:
-    def __init__(
-        self,
-        *,
-        thread_id: str,
-        run_id: str,
-        parent_run_id: str | None,
-        state: ag_ui.core.State,
-        messages: list[ag_ui.core.Message],
-    ):
-        self._thread_id = thread_id
-        self._run_id = run_id
-        self._parent_run_id = parent_run_id
+    def __init__(self, *, run_input: ag_ui.core.RunAgentInput):
+        self._run_input = run_input
+        self._thread_id = run_input.thread_id
+        self._run_id = run_input.run_id
+        self._parent_run_id = run_input.parent_run_id
 
-        self._state = state
-        self._messages = self._convert_messages(messages)
+        self._state = run_input.state
+        self._parent_messages = self._convert_messages(run_input.messages)
+        self._messages: dict[str, orm.Message] = {}
 
         self._progress = RunProgress.NOT_STARTED
         self._text_message_data: dict[str, TextMessageData] = {}
@@ -97,15 +91,17 @@ class EventProcessor:
         self._reasoning_data: dict[str, ReasoningData] = {}
         self._thinking_message_id: str | None = None
 
-        self._logger = structlog.get_logger(thread_id=thread_id, run_id=run_id, parent_run_id=parent_run_id)
+        self._logger = structlog.get_logger(
+            thread_id=run_input.thread_id, run_id=run_input.run_id, parent_run_id=run_input.parent_run_id
+        )
 
-    def _convert_messages(
-        self, messages: list[ag_ui.core.Message], *, updated_at: datetime | None = None
-    ) -> dict[str, orm.Message]:
+    def _convert_messages(self, messages: list[ag_ui.core.Message]) -> dict[str, orm.Message]:
+        message_uids = {m.id: uuid.uuid4() for m in messages}
+
         tool_calls = {
             tc.id: orm.ToolCall(
                 id=tc.id,
-                assistant_message_id=m.id,
+                assistant_message_id=message_uids[m.id],
                 tool_message_id=None,
                 name=tc.function.name,
                 arguments=tc.function.arguments,
@@ -139,10 +135,9 @@ class EventProcessor:
                             text = None
                             file_id = metadata.file_id
                         input_contents.append(
-                            orm.InputContent(user_message_id=m.id, index=i, text=text, file_id=file_id)
+                            orm.InputContent(user_message_id=message_uids[m.id], index=i, text=text, file_id=file_id)
                         )
                     data = {**m.model_dump(exclude={"content"}), "input_contents": input_contents}
-                    print()
                 case ag_ui.core.AssistantMessage():
                     data = {
                         **m.model_dump(exclude={"tool_calls"}),
@@ -150,15 +145,14 @@ class EventProcessor:
                     }
                 case ag_ui.core.ToolMessage():
                     tool_call = tool_calls[m.tool_call_id]
-                    tool_call.tool_message_id = m.id
+                    tool_call.tool_message_id = message_uids[m.id]
                     data = {**m.model_dump(exclude={"tool_call_id"}), "tool_call": tool_call}
                 case _:
                     data = m.model_dump()
 
-            if updated_at is not None:
-                data["updated_at"] = updated_at
-            data["thread_id"] = self._thread_id
-
+            data["uid"] = message_uids[m.id]
+            # Parent messages are never persisted; run_id is a placeholder to satisfy SQLAlchemy
+            data["run_id"] = ""
             converted_messages[m.id] = cls(**data)
 
         return converted_messages
@@ -345,9 +339,12 @@ class EventProcessor:
                     )
                     return None
 
+                if event.message_id in self._parent_messages and not event.replace:
+                    return None
+
                 self._messages[event.message_id] = orm.ActivityMessage(
                     id=event.message_id,
-                    thread_id=self._thread_id,
+                    run_id="",
                     created_at=parse_timestamp(event.timestamp),
                     content=event.content,
                     activity_type=event.activity_type,
@@ -355,13 +352,25 @@ class EventProcessor:
             case ag_ui.core.ActivityDeltaEvent():
                 message = self._messages.get(event.message_id)
                 if message is None:
-                    logger.error(
-                        "event",
-                        state="dropped",
-                        reason="message does not exist",
-                        message_id=event.message_id,
+                    message = self._parent_messages.get(event.message_id)
+                    if message is None:
+                        logger.error(
+                            "event",
+                            state="dropped",
+                            reason="message does not exist",
+                            message_id=event.message_id,
+                        )
+                        return None
+                    # Copy inherited message to delta bucket
+                    self._messages[event.message_id] = orm.ActivityMessage(
+                        id=message.id,
+                        run_id="",
+                        created_at=message.created_at,
+                        content=message.content,
+                        activity_type=message.activity_type,
                     )
-                    return None
+                    message = self._messages[event.message_id]
+
                 if not isinstance(message, orm.ActivityMessage):
                     logger.error(
                         "event",
@@ -385,7 +394,6 @@ class EventProcessor:
                 if content is None:
                     return None
 
-                message.updated_at = parse_timestamp(event.timestamp)
                 message.content = content
             # special events
             # reasoning events
@@ -481,13 +489,20 @@ class EventProcessor:
             )
             return None
 
-    def extract(self) -> tuple[orm.State, list[orm.Message]]:
-        return self._state, self._extract_messages()
+    def extract(self) -> orm.Run:
+        delta_messages = list(self._messages.values()) + self._extract_messages()
+        for m in delta_messages:
+            m.run_id = self._run_input.run_id
+        return orm.Run(
+            id=self._run_input.run_id,
+            thread_id=self._run_input.thread_id,
+            parent_run_id=self._run_input.parent_run_id,
+            state=self._state,
+            messages=delta_messages,
+        )
 
     def _extract_messages(self) -> list[orm.Message]:
-        tool_calls: dict[str, orm.ToolCall] = {}
-        tool_calls_created_at: dict[str, datetime] = {}
-        grouped_tool_calls: dict[str, list[orm.ToolCall]] = {}
+        grouped_tool_calls: dict[str, list[ToolCallData]] = {}
         for tcd in self._tool_call_data.values():
             if not tcd.finished:
                 self._logger.warn(
@@ -499,47 +514,54 @@ class EventProcessor:
                     parent_message_id=tcd.parent_message_id,
                 )
                 continue
+            grouped_tool_calls.setdefault(tcd.parent_message_id, []).append(tcd)
 
-            tool_call = orm.ToolCall(
-                id=tcd.tool_call_id,
-                assistant_message_id=tcd.parent_message_id,
-                tool_message_id=None,
-                name=tcd.tool_call_name,
-                arguments="".join(tcd.arguments_delta),
-                # FIXME
-                encrypted_value=None,
-            )
-            tool_calls[tool_call.id] = tool_call
-            tool_calls_created_at[tool_call.id] = tcd.created_at
-            grouped_tool_calls.setdefault(tool_call.assistant_message_id, []).append(tool_call)
-
-        messages: list[orm.Message] = list(self._messages.values())
+        # Build assistant messages so we have their UUIDs for tool call FKs
+        assistant_messages: dict[str, orm.AssistantMessage] = {}
 
         for tmd in self._text_message_data.values():
             if not tmd.finished:
                 self._logger.warn("text message", state="dropped", reason="unfinished", message_id=tmd.message_id)
                 continue
 
-            messages.append(
-                orm.AssistantMessage(
-                    id=tmd.message_id,
-                    thread_id=self._thread_id,
-                    created_at=tmd.created_at,
-                    content="".join(tmd.content_deltas) or None,
-                    tool_calls=grouped_tool_calls.pop(tmd.message_id, []),
-                )
+            assistant_messages[tmd.message_id] = orm.AssistantMessage(
+                uid=uuid.uuid4(),
+                run_id="",
+                id=tmd.message_id,
+                created_at=tmd.created_at,
+                content="".join(tmd.content_deltas) or None,
+                tool_calls=[],
             )
 
-        for mid, tcs in grouped_tool_calls.items():
-            messages.append(
-                orm.AssistantMessage(
-                    id=mid,
-                    thread_id=self._thread_id,
-                    created_at=min(tool_calls_created_at[tc.id] for tc in tcs),
+        for parent_message_id, tcds in grouped_tool_calls.items():
+            if parent_message_id not in assistant_messages:
+                assistant_messages[parent_message_id] = orm.AssistantMessage(
+                    uid=uuid.uuid4(),
+                    run_id="",
+                    id=parent_message_id,
+                    created_at=min(tcd.created_at for tcd in tcds),
                     content=None,
-                    tool_calls=tcs,
+                    tool_calls=[],
                 )
-            )
+
+        tool_calls: dict[str, orm.ToolCall] = {}
+        for parent_message_id, tcds in grouped_tool_calls.items():
+            parent_msg = assistant_messages[parent_message_id]
+            for tcd in tcds:
+                tool_call = orm.ToolCall(
+                    id=tcd.tool_call_id,
+                    assistant_message_id=parent_msg.uid,
+                    tool_message_id=None,
+                    name=tcd.tool_call_name,
+                    arguments="".join(tcd.arguments_delta),
+                    encrypted_value=None,
+                )
+                tool_calls[tool_call.id] = tool_call
+                parent_msg.tool_calls.append(tool_call)
+
+        messages: list[orm.Message] = []
+
+        messages.extend(assistant_messages.values())
 
         for rd in self._reasoning_data.values():
             if not rd.finished:
@@ -548,8 +570,9 @@ class EventProcessor:
 
             messages.append(
                 orm.ReasoningMessage(
+                    uid=uuid.uuid4(),
+                    run_id="",
                     id=rd.message_id,
-                    thread_id=self._thread_id,
                     created_at=rd.created_at,
                     content="".join(rd.content_deltas),
                 )
@@ -565,14 +588,17 @@ class EventProcessor:
                     tool_call_id=trd.tool_call_id,
                 )
                 continue
+            msg_uid = uuid.uuid4()
+            tool_call = tool_calls[trd.tool_call_id]
+            tool_call.tool_message_id = msg_uid
             messages.append(
                 orm.ToolMessage(
+                    uid=msg_uid,
+                    run_id="",
                     id=trd.message_id,
-                    thread_id=self._thread_id,
                     created_at=trd.created_at,
                     content=trd.content,
-                    tool_call=tool_calls[trd.tool_call_id],
-                    # FIXME
+                    tool_call=tool_call,
                     error=None,
                     encrypted_value=None,
                 )

@@ -24,13 +24,17 @@ class TestEventProcessor:
 
     @pytest_cases.parametrize_with_cases("test_case", cases=test_events_cases.EventProcessingCases)
     async def test_event_processing(self, test_case: test_events_cases.EventProcessingCase):
-        event_processor = EventProcessor(
+        run_input = ag_ui.core.RunAgentInput(
             thread_id=test_case.thread_id,
             run_id=test_case.run_id,
             parent_run_id=test_case.parent_run_id,
             state=test_case.state,
             messages=test_case.messages,
+            tools=[],
+            context=[],
+            forwarded_props=None,
         )
+        event_processor = EventProcessor(run_input=run_input)
 
         input = test_case.input
         if test_case.handle_run_lifecycle_events:
@@ -52,10 +56,11 @@ class TestEventProcessor:
 
         self.assert_equal(actual_event_stream, test_case.expected_event_stream)
 
-        actual_state, actual_orm_messages = event_processor.extract()
+        actual_run = event_processor.extract()
         actual_messages = pydantic.TypeAdapter(list[schema.AugmentedMessage]).validate_python(
-            actual_orm_messages, from_attributes=True
+            actual_run.messages, from_attributes=True
         )
+        actual_state = actual_run.state
 
         compyre.assert_equal(actual_state, test_case.expected_state)
         self.assert_equal(actual_messages, test_case.expected_messages)
