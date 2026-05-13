@@ -117,6 +117,7 @@ class Thread(Base, kw_only=True, repr=False):
         back_populates="thread",
         cascade="all, delete-orphan",
         order_by="Run.created_at.asc()",
+        lazy="selectin",
     )
 
 

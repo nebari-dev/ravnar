@@ -66,13 +66,10 @@ def make_router(
 
     @router.get("/{threadId}/messages")
     async def get_thread_messages(
-        id: Annotated[str, Path(alias="threadId")],
+        thread_id: Annotated[str, Path(alias="threadId")],
         user: schema.User = Depends(authenticated_user),  # noqa: B008
     ) -> list[schema.AugmentedMessage]:
-        latest_run = await database.get_latest_run(thread_id=id)
-        if latest_run is None:
-            return []
-        messages = await database.get_run_messages(run_id=latest_run.id)
+        _, _, messages = await database.get_thread_history(user_id=user.id, thread_id=thread_id, run_id=None)
         return pydantic.TypeAdapter(list[schema.AugmentedMessage]).validate_python(messages, from_attributes=True)
 
     @router.get("/{threadId}/runs")
@@ -103,7 +100,7 @@ def make_router(
         thread_id: Annotated[str, Path(alias="threadId")],
         run_id: Annotated[str, Path(alias="runId")],
     ) -> list[schema.AugmentedMessage]:
-        messages = await database.get_run_messages(run_id=run_id)
+        _, _, messages = await database.get_thread_history(user_id=user.id, thread_id=thread_id, run_id=run_id)
         return pydantic.TypeAdapter(list[schema.AugmentedMessage]).validate_python(messages, from_attributes=True)
 
     @router.sse("/{threadId}/runs", methods=["POST"], response_model=schema.Event, tags=["Runs"])
@@ -113,31 +110,13 @@ def make_router(
         thread_id: Annotated[str, Path(alias="threadId")],
         data: schema.CreateRunData,
     ) -> fastsse.Response:
-        thread = await database.get_thread(user_id=user.id, id=thread_id)
+        thread, parent_run, parent_messages = await database.get_thread_history(
+            user_id=user.id, thread_id=thread_id, run_id=data.parent_run_id
+        )
 
-        parent_run_id = data.parent_run_id
-        if parent_run_id is not None:
-            parent_run = await database.get_run(id=parent_run_id, user_id=user.id)
-            if parent_run.thread_id != thread_id:
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                    detail="parent_run_id does not belong to this thread",
-                )
-        else:
-            latest_run = await database.get_latest_run(thread_id=thread_id)
-            parent_run_id = latest_run.id if latest_run is not None else None
-
-        parent_run: orm.Run | None = None
-        parent_messages: list[schema.AugmentedMessage] = []
-        if parent_run_id is not None:
-            parent_run, orm_messages = await database.get_run_history(
-                run_id=parent_run_id, user_id=user.id, thread_id=thread_id
-            )
-            parent_messages = pydantic.TypeAdapter(list[schema.AugmentedMessage]).validate_python(
-                orm_messages, from_attributes=True
-            )
-
-        messages = list(parent_messages)
+        messages = pydantic.TypeAdapter(list[schema.AugmentedMessage]).validate_python(
+            parent_messages, from_attributes=True
+        )
         messages.extend(data.messages)
 
         for m in messages:
@@ -162,9 +141,9 @@ def make_router(
         client_message_ids = {m.id for m in data.messages}
 
         run_agent_input = ag_ui.core.RunAgentInput(
-            thread_id=thread.id,
+            thread_id=thread_id,
             run_id=data.id,
-            parent_run_id=parent_run_id,
+            parent_run_id=data.parent_run_id,
             state=parent_run.state if parent_run is not None else None,
             messages=[pydantic.TypeAdapter(ag_ui.core.Message).validate_python(m.model_dump()) for m in messages],
             tools=data.tools,
