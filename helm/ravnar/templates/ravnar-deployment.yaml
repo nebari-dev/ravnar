@@ -23,7 +23,7 @@ spec:
       {{- end }}
       containers:
         - name: ravnar
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          image: "{{ tpl .Values.image.repository . }}:{{ tpl .Values.image.tag . | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           {{- with .Values.securityContext.container }}
           securityContext:
@@ -89,7 +89,7 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /var/ravnar/helm/config.yaml
-              subPath: {{ if .Values.config.existingConfigMap.name }}{{ .Values.config.existingConfigMap.key }}{{ else }}config.yaml{{ end }}
+              subPath: {{ if .Values.config.existingConfigMap.name }}{{ tpl .Values.config.existingConfigMap.key . }}{{ else }}config.yaml{{ end }}
               readOnly: true
             - name: local-storage
               mountPath: /var/ravnar/local_storage

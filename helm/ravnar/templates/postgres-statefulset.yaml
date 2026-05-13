@@ -24,14 +24,14 @@ spec:
       {{- end }}
       containers:
         - name: {{ $component }}
-          image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+          image: "{{ tpl .Values.postgres.image.repository . }}:{{ tpl .Values.postgres.image.tag . }}"
           imagePullPolicy: {{ .Values.postgres.image.pullPolicy }}
           {{- with .Values.postgres.securityContext.container }}
           securityContext:
             {{- . | toYaml | nindent 12 }}
           {{- end }}
           resources:
-            {{- toYaml .Values.resources | nindent 12 }}
+            {{- toYaml .Values.postgres.resources | nindent 12 }}
           env:
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
