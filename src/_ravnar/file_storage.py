@@ -11,9 +11,11 @@ import ag_ui.core
 import httpx
 import pydantic
 from fastapi import HTTPException, status
+from opentelemetry import trace
 from upath import UPath
 
 from _ravnar import orm, schema
+from _ravnar.observability import traced
 from _ravnar.utils import as_awaitable
 
 if TYPE_CHECKING:
@@ -106,6 +108,7 @@ class FileHandler:
             "custom": self._extract_custom,
         }
 
+    @traced()
     async def add(self, file_input_content: FileInputContent, *, user_id: str) -> tuple[orm.File, bytes]:
         source_type = file_input_content.source.type
         if source_type not in self._extractors:
@@ -126,6 +129,7 @@ class FileHandler:
 
         return file, data.content
 
+    @traced()
     async def add_or_read(self, file_input_content: FileInputContent, *, user_id: str) -> tuple[orm.File, bytes]:
         if (
             isinstance(file_input_content.source, ag_ui.core.InputContentDataSource)
@@ -154,12 +158,18 @@ class FileHandler:
 
         url = file_input_content.source.value
         mime_type = file_input_content.source.mime_type
-        async with httpx.AsyncClient(follow_redirects=True) as client:
-            response = await client.get(url)
-            if not response.is_success:
-                raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to fetch file from URL")
-            content = response.content
-            content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+        tracer = trace.get_tracer(__name__)
+        with tracer.start_as_current_span("FileHandler.fetch_url"):
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                response = await client.get(url)
+                if not response.is_success:
+                    span = trace.get_current_span()
+                    exc = HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to fetch file from URL")
+                    span.record_exception(exc)
+                    span.set_status(trace.StatusCode.ERROR, description="Failed to fetch file from URL")
+                    raise exc
+                content = response.content
+                content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
 
         if not mime_type:
             mime_type = content_type
@@ -176,14 +186,17 @@ class FileHandler:
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Custom file source type is not supported"
         )
 
+    @traced()
     async def get(self, id: uuid.UUID, *, user_id: str) -> orm.File:
         return await self._database.get_file(id=id, user_id=user_id)
 
+    @traced()
     async def read(self, id: uuid.UUID, *, user_id: str) -> tuple[str, bytes]:
         file = await self._database.get_file(id=id, user_id=user_id)
         content = await self._storage.read(file.id)
         return file.mime_type, content
 
+    @traced()
     async def delete(self, id: uuid.UUID, *, user_id: str) -> None:
         await self._database.delete_file(id=id, user_id=user_id)
         await self._storage.delete(id)

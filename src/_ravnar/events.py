@@ -13,6 +13,7 @@ import ag_ui.encoder
 import jsonpatch
 import pydantic
 import structlog
+from opentelemetry import trace
 
 from _ravnar.file_storage import WrappedMetadata
 from _ravnar.observability import LazyValue
@@ -20,8 +21,10 @@ from _ravnar.observability import LazyValue
 from . import orm
 from .utils import now
 
+tracer = trace.get_tracer(__name__)
+
 if TYPE_CHECKING:
-    from structlog.types import FilteringBoundLogger
+    pass
 
 TEvent = TypeVar("TEvent", bound=ag_ui.core.Event)
 
@@ -166,26 +169,62 @@ class EventProcessor:
     async def process_event_stream(
         self, event_stream: AsyncIterable[ag_ui.core.Event]
     ) -> AsyncIterator[ag_ui.core.Event]:
+        span = tracer.start_span("EventProcessor.run")
+        span.set_attribute("thread_id", self._thread_id)
+        span.set_attribute("run_id", self._run_id)
+        if self._parent_run_id is not None:
+            span.set_attribute("parent_run_id", self._parent_run_id)
+
         events = aiter(event_stream)
-        while True:
-            try:
-                event = await anext(events)
-            except StopAsyncIteration:
-                return
-            except Exception:
-                message = "unhandled exception in agent"
-                self._logger.exception(message)
+        try:
+            while True:
+                try:
+                    event = await anext(events)
+                except StopAsyncIteration:
+                    return
+                except Exception as exc:
+                    message = "unhandled exception in agent"
+                    self._logger.exception(message)
+                    span.record_exception(exc)
+                    span.set_status(trace.StatusCode.ERROR, description=message)
 
-                if self._progress == RunProgress.STARTED:
-                    yield ag_ui.core.RunErrorEvent(
-                        timestamp=int(time.time()), message=message, code="ravnar:unhandled-exception"
-                    )
+                    if self._progress == RunProgress.STARTED:
+                        yield ag_ui.core.RunErrorEvent(
+                            timestamp=int(time.time()), message=message, code="ravnar:unhandled-exception"
+                        )
 
-                return
+                    return
 
-            processed_event = self._process_event(event)
-            if processed_event is not None:
-                yield processed_event
+                processed_event = self._process_event(event)
+                if processed_event is not None:
+                    if isinstance(processed_event, ag_ui.core.RunErrorEvent):
+                        span.set_status(
+                            trace.StatusCode.ERROR,
+                            description=f"{processed_event.message} ({processed_event.code})",
+                        )
+                    yield processed_event
+        finally:
+            span.end()
+
+    def _add_event_span(
+        self,
+        event: ag_ui.core.Event,
+        state: str | None = None,
+        reason: str | None = None,
+        **extra_attrs: Any,
+    ) -> None:
+        span = trace.get_current_span()
+        attributes: dict[str, Any] = {"event.type": event.type}
+        if hasattr(event, "message_id"):
+            attributes["message_id"] = event.message_id
+        if hasattr(event, "tool_call_id"):
+            attributes["tool_call_id"] = event.tool_call_id
+        if state is not None:
+            attributes["event.state"] = state
+        if reason is not None:
+            attributes["event.reason"] = reason
+        attributes.update(extra_attrs)
+        span.add_event(event.type, attributes=attributes)
 
     def _process_event(self, event: ag_ui.core.Event) -> ag_ui.core.Event | None:
         logger = self._logger.bind(event_type=event.type)
@@ -193,44 +232,48 @@ class EventProcessor:
         logger.debug("event", agent_event=LazyValue(event.model_dump))
 
         if self._progress == RunProgress.NOT_STARTED and not isinstance(event, ag_ui.core.RunStartedEvent):
-            logger.error("event", state="dropped", reason="not started")
+            self._add_event_span(event, state="dropped", reason="not started")
             return None
 
         if self._progress == RunProgress.FINISHED:
-            logger.error("event", state="dropped", reason="finished")
+            self._add_event_span(event, state="dropped", reason="finished")
             return None
+
+        state: str | None = None
+        reason: str | None = None
+        extra_attrs: dict[str, Any] = {}
 
         match event:
             # lifecycle events
             case ag_ui.core.RunStartedEvent():
                 if self._progress != RunProgress.NOT_STARTED:
-                    logger.warn("event", state="dropped", reason="already started")
-                    return None
-                if (
+                    state = "dropped"
+                    reason = "already started"
+                elif (
                     event.thread_id != self._thread_id
                     or event.run_id != self._run_id
                     or event.parent_run_id != self._parent_run_id
                 ):
-                    logger.warn(
-                        "event",
-                        state="overridden",
-                        reason="mismatching lifecycle data",
-                        event_lifecycle_data=event.model_dump(
+                    state = "overridden"
+                    reason = "mismatching lifecycle data"
+                    extra_attrs = {
+                        "event_lifecycle_data": event.model_dump(
                             include={"thread_id", "run_id", "parent_run_id"}, mode="json"
                         ),
-                    )
+                    }
                     event = self._override_event(
                         event, thread_id=self._thread_id, run_id=self._run_id, parent_run_id=self._parent_run_id
                     )
-                self._progress = RunProgress.STARTED
+                    self._progress = RunProgress.STARTED
+                else:
+                    self._progress = RunProgress.STARTED
             case ag_ui.core.RunFinishedEvent():
                 if event.thread_id != self._thread_id or event.run_id != self._run_id:
-                    logger.warn(
-                        "event",
-                        state="overridden",
-                        reason="mismatching lifecycle data",
-                        event_lifecycle_data=event.model_dump(include={"thread_id", "run_id"}, mode="json"),
-                    )
+                    state = "overridden"
+                    reason = "mismatching lifecycle data"
+                    extra_attrs = {
+                        "event_lifecycle_data": event.model_dump(include={"thread_id", "run_id"}, mode="json"),
+                    }
                     event = self._override_event(event, thread_id=self._thread_id, run_id=self._run_id)
                 self._progress = RunProgress.FINISHED
             case ag_ui.core.RunErrorEvent():
@@ -238,7 +281,9 @@ class EventProcessor:
             # text message events
             case ag_ui.core.TextMessageStartEvent():
                 if event.message_id in self._text_message_data:
-                    logger.warn("event", state="overridden", reason="already started", message_id=event.message_id)
+                    state = "overridden"
+                    reason = "already started"
+                    extra_attrs = {"message_id": event.message_id}
                 self._text_message_data[event.message_id] = TextMessageData(
                     created_at=parse_timestamp(event.timestamp),
                     message_id=event.message_id,
@@ -246,32 +291,37 @@ class EventProcessor:
             case ag_ui.core.TextMessageContentEvent():
                 tmd = self._text_message_data.get(event.message_id)
                 if tmd is None:
-                    logger.warn("event", state="dropped", reason="not started", message_id=event.message_id)
-                    return None
-                if tmd.finished:
-                    logger.warn("event", state="dropped", reason="finished", message_id=event.message_id)
-                    return None
-                tmd.content_deltas.append(event.delta)
+                    state = "dropped"
+                    reason = "not started"
+                    extra_attrs = {"message_id": event.message_id}
+                elif tmd.finished:
+                    state = "dropped"
+                    reason = "finished"
+                    extra_attrs = {"message_id": event.message_id}
+                else:
+                    tmd.content_deltas.append(event.delta)
             case ag_ui.core.TextMessageEndEvent():
                 tmd = self._text_message_data.get(event.message_id)
                 if tmd is None:
-                    logger.warn("event", state="dropped", reason="not started", message_id=event.message_id)
-                    return None
-                if tmd.finished:
-                    logger.warn("event", state="dropped", reason="already finished", message_id=event.message_id)
-                    return None
-                tmd.finished = True
+                    state = "dropped"
+                    reason = "not started"
+                    extra_attrs = {"message_id": event.message_id}
+                elif tmd.finished:
+                    state = "dropped"
+                    reason = "already finished"
+                    extra_attrs = {"message_id": event.message_id}
+                else:
+                    tmd.finished = True
             # tool call events
             case ag_ui.core.ToolCallStartEvent():
                 if event.tool_call_id in self._tool_call_data:
-                    logger.warn(
-                        "event",
-                        state="overridden",
-                        reason="already started",
-                        tool_call_id=event.tool_call_id,
-                        tool_call_name=event.tool_call_name,
-                        parent_message_id=event.parent_message_id,
-                    )
+                    state = "overridden"
+                    reason = "already started"
+                    extra_attrs = {
+                        "tool_call_id": event.tool_call_id,
+                        "tool_call_name": event.tool_call_name,
+                        "parent_message_id": event.parent_message_id,
+                    }
                 if event.parent_message_id is not None:
                     parent_message_id = event.parent_message_id
                 elif self._text_message_data:
@@ -292,30 +342,32 @@ class EventProcessor:
             case ag_ui.core.ToolCallArgsEvent():
                 tcd = self._tool_call_data.get(event.tool_call_id)
                 if tcd is None:
-                    logger.warn("event", state="dropped", reason="not started", tool_call_id=event.tool_call_id)
-                    return None
-                if tcd.finished:
-                    logger.warn("event", state="dropped", reason="finished", tool_call_id=event.tool_call_id)
-                    return None
-                tcd.arguments_delta.append(event.delta)
+                    state = "dropped"
+                    reason = "not started"
+                    extra_attrs = {"tool_call_id": event.tool_call_id}
+                elif tcd.finished:
+                    state = "dropped"
+                    reason = "finished"
+                    extra_attrs = {"tool_call_id": event.tool_call_id}
+                else:
+                    tcd.arguments_delta.append(event.delta)
             case ag_ui.core.ToolCallEndEvent():
                 tcd = self._tool_call_data.get(event.tool_call_id)
                 if tcd is None:
-                    logger.warn("event", state="dropped", reason="not started", tool_call_id=event.tool_call_id)
-                    return None
-                if tcd.finished:
-                    logger.warn("event", state="dropped", reason="already finished", tool_call_id=event.tool_call_id)
-                    return None
-                tcd.finished = True
+                    state = "dropped"
+                    reason = "not started"
+                    extra_attrs = {"tool_call_id": event.tool_call_id}
+                elif tcd.finished:
+                    state = "dropped"
+                    reason = "already finished"
+                    extra_attrs = {"tool_call_id": event.tool_call_id}
+                else:
+                    tcd.finished = True
             case ag_ui.core.ToolCallResultEvent():
                 if event.message_id in self._tool_result_data:
-                    logger.warn(
-                        "event",
-                        state="overridden",
-                        reason="already received",
-                        message_id=event.message_id,
-                        tool_call_id=event.tool_call_id,
-                    )
+                    state = "overridden"
+                    reason = "already received"
+                    extra_attrs = {"message_id": event.message_id, "tool_call_id": event.tool_call_id}
                 self._tool_result_data[event.message_id] = ToolResultData(
                     created_at=parse_timestamp(event.timestamp),
                     message_id=event.message_id,
@@ -326,67 +378,56 @@ class EventProcessor:
             case ag_ui.core.StateSnapshotEvent():
                 self._state = event.snapshot
             case ag_ui.core.StateDeltaEvent():
-                state = self._apply_jsonpatch(self._state, event.delta, logger=logger)
-                if state is None:
-                    return None
-                self._state = state
+                new_state = self._apply_jsonpatch(self._state, event.delta)
+                if new_state is None:
+                    state = "dropped"
+                    reason = "invalid JSON patches"
+                else:
+                    self._state = new_state
             # case ag_ui.core.MessagesSnapshotEvent():
             #     self._messages = self._convert_messages(event.messages, updated_at=parse_timestamp(event.timestamp))
             #     return ag_ui.core.MessagesSnapshotEvent(messages=messages, timestamp=event.timestamp, raw_event=event)
             # activity events
             case ag_ui.core.ActivitySnapshotEvent():
                 if event.message_id in self._messages and not event.replace:
-                    logger.info(
-                        "event",
-                        state="dropped",
-                        reason="message already exist",
-                        message_id=event.message_id,
-                        replace=event.replace,
+                    state = "dropped"
+                    reason = "message already exist"
+                    extra_attrs = {"message_id": event.message_id, "replace": event.replace}
+                else:
+                    self._messages[event.message_id] = orm.ActivityMessage(
+                        id=event.message_id,
+                        thread_id=self._thread_id,
+                        created_at=parse_timestamp(event.timestamp),
+                        content=event.content,
+                        activity_type=event.activity_type,
                     )
-                    return None
-
-                self._messages[event.message_id] = orm.ActivityMessage(
-                    id=event.message_id,
-                    thread_id=self._thread_id,
-                    created_at=parse_timestamp(event.timestamp),
-                    content=event.content,
-                    activity_type=event.activity_type,
-                )
             case ag_ui.core.ActivityDeltaEvent():
                 message = self._messages.get(event.message_id)
                 if message is None:
-                    logger.error(
-                        "event",
-                        state="dropped",
-                        reason="message does not exist",
-                        message_id=event.message_id,
-                    )
-                    return None
-                if not isinstance(message, orm.ActivityMessage):
-                    logger.error(
-                        "event",
-                        state="dropped",
-                        reason="mismatching message role",
-                        message_role=message.role,
-                    )
-                    return None
+                    state = "dropped"
+                    reason = "message does not exist"
+                    extra_attrs = {"message_id": event.message_id}
+                elif not isinstance(message, orm.ActivityMessage):
+                    state = "dropped"
+                    reason = "mismatching message role"
+                    extra_attrs = {"message_role": message.role}
+                else:
+                    if event.activity_type != message.activity_type:
+                        state = "overridden"
+                        reason = "mismatching activity type"
+                        extra_attrs = {
+                            "message_activity_type": message.activity_type,
+                            "event_activity_type": event.activity_type,
+                        }
+                        event = self._override_event(event, activity_type=message.activity_type)
 
-                if event.activity_type != message.activity_type:
-                    logger.warn(
-                        "event",
-                        state="overridden",
-                        reason="mismatching activity type",
-                        message_activity_type=message.activity_type,
-                        event_activity_type=event.activity_type,
-                    )
-                    event = self._override_event(event, activity_type=message.activity_type)
-
-                content = self._apply_jsonpatch(message.content, event.patch, logger=logger)
-                if content is None:
-                    return None
-
-                message.updated_at = parse_timestamp(event.timestamp)
-                message.content = content
+                    content = self._apply_jsonpatch(message.content, event.patch)
+                    if content is None:
+                        state = "dropped"
+                        reason = "invalid JSON patches"
+                    else:
+                        message.updated_at = parse_timestamp(event.timestamp)
+                        message.content = content
             # special events
             # reasoning events
             case ag_ui.core.ReasoningStartEvent() | ag_ui.core.ReasoningEndEvent():
@@ -394,7 +435,9 @@ class EventProcessor:
                 pass
             case ag_ui.core.ReasoningMessageStartEvent():
                 if event.message_id in self._reasoning_data:
-                    logger.error("event", state="overridden", reason="already started", message_id=event.message_id)
+                    state = "overridden"
+                    reason = "already started"
+                    extra_attrs = {"message_id": event.message_id}
                 self._reasoning_data[event.message_id] = ReasoningData(
                     created_at=parse_timestamp(event.timestamp),
                     message_id=event.message_id,
@@ -402,21 +445,27 @@ class EventProcessor:
             case ag_ui.core.ReasoningMessageContentEvent():
                 rd = self._reasoning_data.get(event.message_id)
                 if rd is None:
-                    logger.error("event", state="dropped", reason="not started", message_id=event.message_id)
-                    return None
-                if rd.finished:
-                    logger.error("event", state="dropped", reason="finished", message_id=event.message_id)
-                    return None
-                rd.content_deltas.append(event.delta)
+                    state = "dropped"
+                    reason = "not started"
+                    extra_attrs = {"message_id": event.message_id}
+                elif rd.finished:
+                    state = "dropped"
+                    reason = "finished"
+                    extra_attrs = {"message_id": event.message_id}
+                else:
+                    rd.content_deltas.append(event.delta)
             case ag_ui.core.ReasoningMessageEndEvent():
                 rd = self._reasoning_data.get(event.message_id)
                 if rd is None:
-                    logger.error("event", state="dropped", reason="not started", message_id=event.message_id)
-                    return None
-                if rd.finished:
-                    logger.error("event", state="dropped", reason="already finished", message_id=event.message_id)
-                    return None
-                rd.finished = True
+                    state = "dropped"
+                    reason = "not started"
+                    extra_attrs = {"message_id": event.message_id}
+                elif rd.finished:
+                    state = "dropped"
+                    reason = "already finished"
+                    extra_attrs = {"message_id": event.message_id}
+                else:
+                    rd.finished = True
             case (
                 ag_ui.core.ThinkingStartEvent()
                 | ag_ui.core.ThinkingEndEvent()
@@ -447,14 +496,19 @@ class EventProcessor:
                 }
                 if isinstance(event, ag_ui.core.ThinkingTextMessageStartEvent):
                     event_data["role"] = "reasoning"
+                self._add_event_span(event, state="replaced", reason="deprecated")
                 event = pydantic.TypeAdapter(ag_ui.core.Event).validate_python(event_data)
-                logger.warning("event", state="replaced", reason="deprecated")
                 return self._process_event(event)
             case _:
-                logger.warn(
-                    "event", state="passed through", reason="unknown event type", agent_event=event.model_dump()
-                )
+                state = "passed through"
+                reason = "unknown event type"
+                extra_attrs = {"agent_event": event.model_dump()}
 
+        if state == "dropped":
+            self._add_event_span(event, state=state, reason=reason, **extra_attrs)
+            return None
+
+        self._add_event_span(event, state=state, reason=reason, **extra_attrs)
         return event
 
     @staticmethod
@@ -465,20 +519,11 @@ class EventProcessor:
     def _override_event(event: TEvent, **replace: Any) -> TEvent:
         return cast(TEvent, event.model_copy(update={"raw_event": event, **replace}))
 
-    @staticmethod
-    def _apply_jsonpatch(document: dict[str, Any], patches: list[Any], *, logger: FilteringBoundLogger) -> Any:
+    def _apply_jsonpatch(self, document: dict[str, Any], patches: list[Any]) -> Any:
         try:
             # this cannot be in-place as it will not roll back in case of an exception
             return jsonpatch.JsonPatch(patches).apply(document, in_place=False)
         except jsonpatch.JsonPatchException:
-            logger.warn(
-                "event",
-                state="dropped",
-                reason="invalid JSON patches",
-                document=document,
-                patches=patches,
-                exc_info=True,
-            )
             return None
 
     def extract(self) -> tuple[orm.State, list[orm.Message]]:
@@ -490,6 +535,15 @@ class EventProcessor:
         grouped_tool_calls: dict[str, list[orm.ToolCall]] = {}
         for tcd in self._tool_call_data.values():
             if not tcd.finished:
+                span = trace.get_current_span()
+                span.add_event(
+                    "unfinished_tool_call",
+                    attributes={
+                        "tool_call_id": tcd.tool_call_id,
+                        "tool_call_name": tcd.tool_call_name,
+                        "parent_message_id": tcd.parent_message_id,
+                    },
+                )
                 self._logger.warn(
                     "tool call",
                     state="dropped",
@@ -517,6 +571,11 @@ class EventProcessor:
 
         for tmd in self._text_message_data.values():
             if not tmd.finished:
+                span = trace.get_current_span()
+                span.add_event(
+                    "unfinished_text_message",
+                    attributes={"message_id": tmd.message_id},
+                )
                 self._logger.warn("text message", state="dropped", reason="unfinished", message_id=tmd.message_id)
                 continue
 
@@ -543,6 +602,11 @@ class EventProcessor:
 
         for rd in self._reasoning_data.values():
             if not rd.finished:
+                span = trace.get_current_span()
+                span.add_event(
+                    "unfinished_reasoning_message",
+                    attributes={"message_id": rd.message_id},
+                )
                 self._logger.warn("reasoning message", state="dropped", reason="unfinished", message_id=rd.message_id)
                 continue
 
@@ -557,6 +621,11 @@ class EventProcessor:
 
         for trd in self._tool_result_data.values():
             if trd.tool_call_id not in tool_calls:
+                span = trace.get_current_span()
+                span.add_event(
+                    "orphaned_tool_message",
+                    attributes={"message_id": trd.message_id, "tool_call_id": trd.tool_call_id},
+                )
                 self._logger.warn(
                     "tool message",
                     state="dropped",

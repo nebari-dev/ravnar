@@ -155,11 +155,25 @@ class AgentHandler:
             messages=run_agent_input.messages,
         )
 
-        async def event_stream() -> AsyncIterator[ag_ui.core.Event]:
-            async for event in event_processor.process_event_stream(agent.run(run_agent_input)):
-                yield event
+        span = tracer.start_span("AgentHandler.run")
+        span.set_attribute("agent_id", agent_id)
+        span.set_attribute("thread_id", run_agent_input.thread_id)
+        span.set_attribute("run_id", run_agent_input.run_id)
+        if run_agent_input.parent_run_id is not None:
+            span.set_attribute("parent_run_id", run_agent_input.parent_run_id)
 
-            if callback is not None:
-                await callback(event_processor)
+        async def event_stream() -> AsyncIterator[ag_ui.core.Event]:
+            try:
+                async for event in event_processor.process_event_stream(agent.run(run_agent_input)):
+                    yield event
+
+                if callback is not None:
+                    await callback(event_processor)
+            except Exception as exc:
+                span.record_exception(exc)
+                span.set_status(trace.StatusCode.ERROR, description=str(exc))
+                raise
+            finally:
+                span.end()
 
         return fastsse.Response(event_stream(), encoder=self._sse_encoder)
