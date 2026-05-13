@@ -415,4 +415,4 @@ class TestThreadsCreateRun:
                 parent_run_id=run_id,
             ).model_dump(mode="json", by_alias=True),
         ) as event_source:
-            assert event_source.response.status_code == 404
+            assert event_source.response.status_code == status.HTTP_404_NOT_FOUND

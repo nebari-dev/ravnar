@@ -138,8 +138,6 @@ def make_router(
                 )
                 input_content.metadata = WrappedMetadata(raw=input_content.metadata, file_id=file.id)
 
-        client_message_ids = {m.id for m in data.messages}
-
         run_agent_input = ag_ui.core.RunAgentInput(
             thread_id=thread_id,
             run_id=data.id,
@@ -152,12 +150,8 @@ def make_router(
         )
 
         async def callback(event_processor: EventProcessor) -> None:
-            # Client-supplied messages are part of this run's delta, not inherited
-            for msg_id in client_message_ids:
-                if msg_id in event_processor._parent_messages:
-                    event_processor._messages[msg_id] = event_processor._parent_messages.pop(msg_id)
-            run = event_processor.extract()
-            await database.create_run(run=run)
+            run = event_processor.extract(include_input_message_ids={m.id for m in data.messages})
+            await database.create_run(run)
 
         return await agent_handler.run(thread.agent_id, run_agent_input, callback=callback)
 

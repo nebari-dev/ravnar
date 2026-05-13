@@ -211,7 +211,7 @@ class Database(SetupTeardownMixin):
             thread.name = name
             return thread
 
-    async def create_run(self, *, run: orm.Run) -> None:
+    async def create_run(self, run: orm.Run) -> None:
         async with self._get_session() as session:
             session.add(run)
 
