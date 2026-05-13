@@ -58,7 +58,7 @@ def _drop_loggers(*loggers: str) -> Processor:
     return drop_logs
 
 
-def add_open_telemetry_spans(_logger: WrappedLogger, _method_name: str, event_dict: EventDict) -> EventDict:
+def add_open_telemetry_spans(logger: WrappedLogger, method_name: str, event_dict: EventDict) -> EventDict:
     span = trace.get_current_span()
     if not span.is_recording():
         event_dict["span"] = None
