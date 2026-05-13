@@ -340,25 +340,21 @@ class TestThreadsCreateRun:
         )
         list(event_stream)
 
-        # List runs
         response = app_client.get(f"/api/threads/{thread_id}/runs").raise_for_status()
         runs_page = schema.Page[schema.Run].model_validate_json(response.content)
         assert len(runs_page.items) == 1
         assert runs_page.items[0].id == run_id
 
-        # Get run
         response = app_client.get(f"/api/threads/{thread_id}/runs/{run_id}").raise_for_status()
         run = schema.Run.model_validate_json(response.content)
         assert run.id == run_id
         assert run.thread_id == thread_id
         assert run.parent_run_id is None
 
-        # Get run messages
         response = app_client.get(f"/api/threads/{thread_id}/runs/{run_id}/messages").raise_for_status()
         messages = pydantic.TypeAdapter(list[schema.AugmentedMessage]).validate_json(response.content)
         assert len(messages) == 2  # user message + assistant response
 
-        # Backward compat thread messages returns latest run snapshot
         response = app_client.get(f"/api/threads/{thread_id}/messages").raise_for_status()
         thread_messages = pydantic.TypeAdapter(list[schema.AugmentedMessage]).validate_json(response.content)
         assert len(thread_messages) == 2
@@ -375,7 +371,6 @@ class TestThreadsCreateRun:
         )
         list(event_stream)
 
-        # Create child run with explicit parent_run_id
         event_stream = self.create_run(
             app_client,
             thread_id=thread_id,
@@ -391,15 +386,13 @@ class TestThreadsCreateRun:
         run2 = schema.Run.model_validate_json(response.content)
         assert run2.parent_run_id == run1_id
 
-        # Run2 messages include run1 messages + new ones
         response = app_client.get(f"/api/threads/{thread_id}/runs/{run2_id}/messages").raise_for_status()
         messages = pydantic.TypeAdapter(list[schema.AugmentedMessage]).validate_json(response.content)
         assert len(messages) == 4  # run1 user+assistant, run2 user+assistant
 
-        # Run1 messages unchanged
         response = app_client.get(f"/api/threads/{thread_id}/runs/{run1_id}/messages").raise_for_status()
         messages1 = pydantic.TypeAdapter(list[schema.AugmentedMessage]).validate_json(response.content)
-        assert len(messages1) == 2
+        assert len(messages1) == 2  # run1 user+assistant
 
     def test_invalid_parent_run_id(self, app_client):
         thread1_id = self.create_thread(app_client).id
@@ -413,7 +406,6 @@ class TestThreadsCreateRun:
         )
         list(event_stream)
 
-        # Try to use run from thread1 as parent for thread2
         with httpx_sse.connect_sse(
             app_client,
             "POST",
