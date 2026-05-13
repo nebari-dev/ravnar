@@ -24,7 +24,7 @@ class TestEventProcessor:
 
     @pytest_cases.parametrize_with_cases("test_case", cases=test_events_cases.EventProcessingCases)
     async def test_event_processing(self, test_case: test_events_cases.EventProcessingCase):
-        run_input = ag_ui.core.RunAgentInput(
+        run_agent_input = ag_ui.core.RunAgentInput(
             thread_id=test_case.thread_id,
             run_id=test_case.run_id,
             parent_run_id=test_case.parent_run_id,
@@ -34,7 +34,7 @@ class TestEventProcessor:
             context=[],
             forwarded_props=None,
         )
-        event_processor = EventProcessor(run_input=run_input)
+        event_processor = EventProcessor(run_agent_input=run_agent_input)
 
         input = test_case.input
         if test_case.handle_run_lifecycle_events:

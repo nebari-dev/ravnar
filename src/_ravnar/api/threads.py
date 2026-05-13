@@ -127,15 +127,15 @@ def make_router(
             latest_run = await database.get_latest_run(thread_id=thread_id)
             parent_run_id = latest_run.id if latest_run is not None else None
 
+        parent_run: orm.Run | None = None
         parent_messages: list[schema.AugmentedMessage] = []
-        parent_state = None
         if parent_run_id is not None:
-            orm_messages = await database.get_run_messages(run_id=parent_run_id)
+            parent_run, orm_messages = await database.get_run_history(
+                run_id=parent_run_id, user_id=user.id, thread_id=thread_id
+            )
             parent_messages = pydantic.TypeAdapter(list[schema.AugmentedMessage]).validate_python(
                 orm_messages, from_attributes=True
             )
-            parent_run = await database.get_run(id=parent_run_id, user_id=user.id)
-            parent_state = parent_run.state
 
         messages = list(parent_messages)
         messages.extend(data.messages)
@@ -165,7 +165,7 @@ def make_router(
             thread_id=thread.id,
             run_id=data.id,
             parent_run_id=parent_run_id,
-            state=parent_state,
+            state=parent_run.state if parent_run is not None else None,
             messages=[pydantic.TypeAdapter(ag_ui.core.Message).validate_python(m.model_dump()) for m in messages],
             tools=data.tools,
             context=data.context,

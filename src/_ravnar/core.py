@@ -147,7 +147,7 @@ class AgentHandler:
         self.assert_available(agent_id)
         agent = self._agents[agent_id]
 
-        event_processor = EventProcessor(run_input=run_agent_input)
+        event_processor = EventProcessor(run_agent_input=run_agent_input)
 
         async def event_stream() -> AsyncIterator[ag_ui.core.Event]:
             async for event in event_processor.process_event_stream(agent.run(run_agent_input)):

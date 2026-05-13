@@ -300,6 +300,78 @@ class Database(SetupTeardownMixin):
             result = await session.execute(query)
             return result.scalar_one_or_none()
 
+    async def get_run_history(
+        self, *, run_id: str, user_id: str, thread_id: str
+    ) -> tuple[orm.Run | None, list[orm.Message]]:
+        """Return the parent run and full message snapshot for a run chain.
+
+        Validates that the resolved run belongs to the given thread and user.
+        """
+        async with self._get_session() as session:
+            # Resolve the target run and validate ownership in one query
+            query = (
+                select(orm.Run)
+                .join(orm.Thread, orm.Run.thread_id == orm.Thread.id)
+                .where(
+                    (orm.Run.id == run_id)
+                    & (orm.Run.thread_id == thread_id)
+                    & (orm.Thread.user_id == user_id)
+                )
+            )
+            result = await session.execute(query)
+            target_run = result.scalar_one_or_none()
+            if target_run is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+
+            # Build the recursive CTE for the run chain
+            from sqlalchemy import literal_column
+
+            run_chain = (
+                select(
+                    orm.Run.id.label("run_id"),
+                    orm.Run.parent_run_id.label("parent_run_id"),
+                    literal_column("0").label("depth"),
+                )
+                .where(orm.Run.id == run_id)
+                .cte(name="run_chain", recursive=True)
+            )
+            run_chain = run_chain.union_all(
+                select(orm.Run.id, orm.Run.parent_run_id, (run_chain.c.depth + 1).label("depth"))
+                .select_from(orm.Run)
+                .join(run_chain, orm.Run.id == run_chain.c.parent_run_id)
+            )
+
+            ranked = (
+                select(
+                    orm.Message.uid,
+                    func.row_number()
+                    .over(
+                        partition_by=orm.Message.id,
+                        order_by=run_chain.c.depth.asc(),
+                    )
+                    .label("rn"),
+                )
+                .join(run_chain, orm.Message.run_id == run_chain.c.run_id)
+                .subquery()
+            )
+
+            messages_query = (
+                select(orm.Message)
+                .join(ranked, orm.Message.uid == ranked.c.uid)
+                .where(ranked.c.rn == 1)
+                .options(
+                    selectinload(orm.UserMessage.input_contents).selectinload(orm.InputContent.file),
+                    selectinload(orm.AssistantMessage.tool_calls),
+                    selectinload(orm.ToolMessage.tool_call).selectinload(orm.ToolCall.tool_message),
+                )
+                .order_by(orm.Message.created_at.asc(), orm.Message.id.asc())
+            )
+
+            messages_result = await session.execute(messages_query)
+            messages = messages_result.unique().scalars().all()
+
+            return target_run, list(messages)
+
     async def delete_threads(self, *, user_id: str, ids: list[str]) -> None:
         async with self._get_session() as session:
             single_page = await self._get_threads(session, user_id=user_id, ids=ids)

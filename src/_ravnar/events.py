@@ -74,14 +74,11 @@ class ReasoningData:
 
 
 class EventProcessor:
-    def __init__(self, *, run_input: ag_ui.core.RunAgentInput):
-        self._run_input = run_input
-        self._thread_id = run_input.thread_id
-        self._run_id = run_input.run_id
-        self._parent_run_id = run_input.parent_run_id
+    def __init__(self, *, run_agent_input: ag_ui.core.RunAgentInput):
+        self._run_agent_input = run_agent_input
 
-        self._state = run_input.state
-        self._parent_messages = self._convert_messages(run_input.messages)
+        self._state = run_agent_input.state
+        self._parent_messages = self._convert_messages(run_agent_input.messages)
         self._messages: dict[str, orm.Message] = {}
 
         self._progress = RunProgress.NOT_STARTED
@@ -92,7 +89,9 @@ class EventProcessor:
         self._thinking_message_id: str | None = None
 
         self._logger = structlog.get_logger(
-            thread_id=run_input.thread_id, run_id=run_input.run_id, parent_run_id=run_input.parent_run_id
+            thread_id=run_agent_input.thread_id,
+            run_id=run_agent_input.run_id,
+            parent_run_id=run_agent_input.parent_run_id,
         )
 
     def _convert_messages(self, messages: list[ag_ui.core.Message]) -> dict[str, orm.Message]:
@@ -201,9 +200,9 @@ class EventProcessor:
                     logger.warn("event", state="dropped", reason="already started")
                     return None
                 if (
-                    event.thread_id != self._thread_id
-                    or event.run_id != self._run_id
-                    or event.parent_run_id != self._parent_run_id
+                    event.thread_id != self._run_agent_input.thread_id
+                    or event.run_id != self._run_agent_input.run_id
+                    or event.parent_run_id != self._run_agent_input.parent_run_id
                 ):
                     logger.warn(
                         "event",
@@ -214,18 +213,28 @@ class EventProcessor:
                         ),
                     )
                     event = self._override_event(
-                        event, thread_id=self._thread_id, run_id=self._run_id, parent_run_id=self._parent_run_id
+                        event,
+                        thread_id=self._run_agent_input.thread_id,
+                        run_id=self._run_agent_input.run_id,
+                        parent_run_id=self._run_agent_input.parent_run_id,
                     )
                 self._progress = RunProgress.STARTED
             case ag_ui.core.RunFinishedEvent():
-                if event.thread_id != self._thread_id or event.run_id != self._run_id:
+                if (
+                    event.thread_id != self._run_agent_input.thread_id
+                    or event.run_id != self._run_agent_input.run_id
+                ):
                     logger.warn(
                         "event",
                         state="overridden",
                         reason="mismatching lifecycle data",
                         event_lifecycle_data=event.model_dump(include={"thread_id", "run_id"}, mode="json"),
                     )
-                    event = self._override_event(event, thread_id=self._thread_id, run_id=self._run_id)
+                    event = self._override_event(
+                        event,
+                        thread_id=self._run_agent_input.thread_id,
+                        run_id=self._run_agent_input.run_id,
+                    )
                 self._progress = RunProgress.FINISHED
             case ag_ui.core.RunErrorEvent():
                 self._progress = RunProgress.FINISHED
@@ -492,11 +501,11 @@ class EventProcessor:
     def extract(self) -> orm.Run:
         delta_messages = list(self._messages.values()) + self._extract_messages()
         for m in delta_messages:
-            m.run_id = self._run_input.run_id
+            m.run_id = self._run_agent_input.run_id
         return orm.Run(
-            id=self._run_input.run_id,
-            thread_id=self._run_input.thread_id,
-            parent_run_id=self._run_input.parent_run_id,
+            id=self._run_agent_input.run_id,
+            thread_id=self._run_agent_input.thread_id,
+            parent_run_id=self._run_agent_input.parent_run_id,
             state=self._state,
             messages=delta_messages,
         )
