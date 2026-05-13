@@ -56,7 +56,7 @@ class TestEventProcessor:
 
         self.assert_equal(actual_event_stream, test_case.expected_event_stream)
 
-        actual_run = event_processor.extract()
+        actual_run = event_processor.extract(include_input_message_ids={m.id for m in test_case.messages})
         actual_messages = pydantic.TypeAdapter(list[schema.AugmentedMessage]).validate_python(
             actual_run.messages, from_attributes=True
         )
