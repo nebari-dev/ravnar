@@ -6,7 +6,6 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 import pydantic
-import structlog
 from fastapi import Depends, Request, status
 from fastapi.exceptions import HTTPException
 from fastapi.security import APIKeyHeader
@@ -53,7 +52,7 @@ class ForwardedUserAuthenticator(Authenticator):
     """Forwarded User Authenticator"""
 
     def __init__(self, *, id_header: str = "X-Forwarded-User"):
-        @traced
+        @traced(name="ForwardedUserAuthenticator.authenticate")
         async def authenticate(id: str = Depends(APIKeyHeader(name=id_header))) -> schema.User:
             return schema.User(id=id)
 
@@ -110,36 +109,31 @@ class OIDCTokenValidator:
 
         self._decode_kwargs = decode_kwargs
 
+    @traced(name="OIDCTokenValidator")
     def __call__(self, token: str) -> schema.User:
-        tracer = trace.get_tracer(__name__)
-        with tracer.start_as_current_span("OIDCTokenValidator.validate"):
-            import jwt
+        try:
+            return self._validate(token)
+        except HTTPException as exc:
+            span = trace.get_current_span()
+            span.add_event("validation_failure", attributes={"reason": exc.detail})
+            raise
 
-            logger = structlog.get_logger()
-            try:
-                payload = jwt.decode(
-                    token, self._jwks_client.get_signing_key_from_jwt(token).key, **self._decode_kwargs
-                )
-            except jwt.ExpiredSignatureError as exc:
-                span = trace.get_current_span()
-                span.add_event("auth_failure", attributes={"reason": "JWT expired"})
-                logger.warning("authentication failed", reason="JWT expired")
-                raise HTTPException(detail="JWT expired", status_code=status.HTTP_401_UNAUTHORIZED) from exc
-            except jwt.InvalidTokenError as exc:
-                span = trace.get_current_span()
-                span.add_event("auth_failure", attributes={"reason": "JWT invalid"})
-                logger.warning("authentication failed", reason="JWT invalid")
-                raise HTTPException(detail="JWT invalid", status_code=status.HTTP_401_UNAUTHORIZED) from exc
+    def _validate(self, token: str) -> schema.User:
+        import jwt
 
-            try:
-                oidc_user = OIDCUser.model_validate(payload)
-            except pydantic.ValidationError as exc:
-                span = trace.get_current_span()
-                span.add_event("auth_failure", attributes={"reason": "JWT payload invalid"})
-                logger.warning("authentication failed", reason="JWT payload invalid")
-                raise HTTPException(detail="JWT payload invalid", status_code=status.HTTP_401_UNAUTHORIZED) from exc
+        try:
+            payload = jwt.decode(token, self._jwks_client.get_signing_key_from_jwt(token).key, **self._decode_kwargs)
+        except jwt.ExpiredSignatureError as exc:
+            raise HTTPException(detail="JWT expired", status_code=status.HTTP_401_UNAUTHORIZED) from exc
+        except jwt.InvalidTokenError as exc:
+            raise HTTPException(detail="JWT invalid", status_code=status.HTTP_401_UNAUTHORIZED) from exc
 
-            return schema.User(id=oidc_user.sub, data=oidc_user.model_dump(exclude={"sub"}))
+        try:
+            oidc_user = OIDCUser.model_validate(payload)
+        except pydantic.ValidationError as exc:
+            raise HTTPException(detail="JWT payload invalid", status_code=status.HTTP_401_UNAUTHORIZED) from exc
+
+        return schema.User(id=oidc_user.sub, data=oidc_user.model_dump(exclude={"sub"}))
 
 
 async def get_bearer_token(
