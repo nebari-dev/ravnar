@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import functools
-import inspect
 import json
 import types
 from collections.abc import Callable, Sequence
@@ -38,7 +37,7 @@ if TYPE_CHECKING:
 P = ParamSpec("P")
 T = TypeVar("T")
 
-_tracer = trace.get_tracer("ravnar.instrumentation")
+tracer = trace.get_tracer("ravnar.instrumentation")
 
 
 def _drop_health_probe_access_logs(logger: WrappedLogger, method_name: str, event_dict: EventDict) -> EventDict:
@@ -88,43 +87,23 @@ class LazyValue:
         return {k: v() if isinstance(v, LazyValue) else v for k, v in event_dict.items()}
 
 
-def traced(span_name: str | None = None) -> Callable[[Callable[P, T]], Callable[P, T]]:
-    def decorator(fn: Callable[P, T]) -> Callable[P, T]:
-        name = span_name or f"{fn.__qualname__}"
+def traced(fn: Callable[P, T]) -> Callable[P, T]:
+    name = f"{fn.__qualname__}"
 
-        if inspect.iscoroutinefunction(fn):
+    @functools.wraps(fn)
+    async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+        with tracer.start_as_current_span(name):
+            try:
+                return cast(T, await fn(*args, **kwargs))
+            except HTTPException as exc:
+                span = trace.get_current_span()
+                span.add_event(
+                    "http_exception",
+                    attributes={"http.status_code": exc.status_code, "error.detail": exc.detail},
+                )
+                raise
 
-            @functools.wraps(fn)
-            async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
-                with _tracer.start_as_current_span(name):
-                    try:
-                        return cast(T, await fn(*args, **kwargs))
-                    except HTTPException as exc:
-                        span = trace.get_current_span()
-                        span.add_event(
-                            "http_exception",
-                            attributes={"http.status_code": exc.status_code, "error.detail": exc.detail},
-                        )
-                        raise
-
-            return cast(Callable[P, T], async_wrapper)
-
-        @functools.wraps(fn)
-        def sync_wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
-            with _tracer.start_as_current_span(name):
-                try:
-                    return fn(*args, **kwargs)
-                except HTTPException as exc:
-                    span = trace.get_current_span()
-                    span.add_event(
-                        "http_exception",
-                        attributes={"http.status_code": exc.status_code, "error.detail": exc.detail},
-                    )
-                    raise
-
-        return cast(Callable[P, T], sync_wrapper)
-
-    return decorator
+    return cast(Callable[P, T], async_wrapper)
 
 
 def configure_logging(config: BaseConfig) -> None:

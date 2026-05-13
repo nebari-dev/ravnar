@@ -108,7 +108,7 @@ class FileHandler:
             "custom": self._extract_custom,
         }
 
-    @traced()
+    @traced
     async def add(self, file_input_content: FileInputContent, *, user_id: str) -> tuple[orm.File, bytes]:
         source_type = file_input_content.source.type
         if source_type not in self._extractors:
@@ -129,7 +129,7 @@ class FileHandler:
 
         return file, data.content
 
-    @traced()
+    @traced
     async def add_or_read(self, file_input_content: FileInputContent, *, user_id: str) -> tuple[orm.File, bytes]:
         if (
             isinstance(file_input_content.source, ag_ui.core.InputContentDataSource)
@@ -186,17 +186,17 @@ class FileHandler:
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Custom file source type is not supported"
         )
 
-    @traced()
+    @traced
     async def get(self, id: uuid.UUID, *, user_id: str) -> orm.File:
         return await self._database.get_file(id=id, user_id=user_id)
 
-    @traced()
+    @traced
     async def read(self, id: uuid.UUID, *, user_id: str) -> tuple[str, bytes]:
         file = await self._database.get_file(id=id, user_id=user_id)
         content = await self._storage.read(file.id)
         return file.mime_type, content
 
-    @traced()
+    @traced
     async def delete(self, id: uuid.UUID, *, user_id: str) -> None:
         await self._database.delete_file(id=id, user_id=user_id)
         await self._storage.delete(id)

@@ -134,7 +134,7 @@ class Database(SetupTeardownMixin):
             items=items,
         )
 
-    @traced()
+    @traced
     async def add_file(self, file: orm.File) -> None:
         async with self._get_session() as session:
             session.add(file)
@@ -146,18 +146,18 @@ class Database(SetupTeardownMixin):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
         return file
 
-    @traced()
+    @traced
     async def get_file(self, *, id: uuid.UUID, user_id: str) -> orm.File:
         async with self._get_session() as session:
             return await self._get_file(session, id=id, user_id=user_id)
 
-    @traced()
+    @traced
     async def delete_file(self, *, id: uuid.UUID, user_id: str) -> None:
         async with self._get_session() as session:
             file = await self._get_file(session, id=id, user_id=user_id)
             await session.delete(file)
 
-    @traced()
+    @traced
     async def create_thread(self, *, user_id: str, id: str, name: str | None, agent_id: str) -> orm.Thread:
         async with self._get_session() as session:
             query = select(orm.Thread).where(orm.Thread.id == id)
@@ -197,7 +197,7 @@ class Database(SetupTeardownMixin):
             session, orm_type=orm.Thread, select_qualifier=select_qualifier, pagination=pagination
         )
 
-    @traced()
+    @traced
     async def get_threads(self, *, user_id: str, pagination: schema.Pagination) -> orm.Page[orm.Thread]:
         async with self._get_session() as session:
             return await self._get_threads(session, user_id=user_id, pagination=pagination)
@@ -212,30 +212,30 @@ class Database(SetupTeardownMixin):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Thread not found")
         return thread
 
-    @traced()
+    @traced
     async def get_thread(self, *, user_id: str, id: str, with_messages: bool = False) -> orm.Thread:
         async with self._get_session() as session:
             return await self._get_thread(session, user_id=user_id, id=id, with_messages=with_messages)
 
-    @traced()
+    @traced
     async def append_messages_to_thread(self, *, user_id: str, id: str, messages: list[orm.Message]) -> None:
         async with self._get_session() as session:
             thread = await self._get_thread(session, user_id=user_id, id=id, with_messages=False)
             thread.messages.extend(messages)
 
-    @traced()
+    @traced
     async def rename_thread(self, *, user_id: str, id: str, name: str) -> orm.Thread:
         async with self._get_session() as session:
             thread = await self._get_thread(session, user_id=user_id, id=id, with_messages=False)
             thread.name = name
             return thread
 
-    @traced()
+    @traced
     async def update_thread(self, thread: orm.Thread) -> None:
         async with self._get_session() as session:
             await session.merge(thread)
 
-    @traced()
+    @traced
     async def delete_threads(self, *, user_id: str, ids: list[str]) -> None:
         async with self._get_session() as session:
             single_page = await self._get_threads(session, user_id=user_id, ids=ids)

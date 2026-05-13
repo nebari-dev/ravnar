@@ -14,6 +14,7 @@ from opentelemetry import trace
 
 from _ravnar import schema
 from _ravnar.file_storage import FileHandler, WrappedMetadata
+from _ravnar.observability import traced
 from _ravnar.utils import as_awaitable, now
 
 tracer = trace.get_tracer(__name__)
@@ -91,26 +92,7 @@ def make_router(
         )
         messages.extend(data.messages)
 
-        with tracer.start_as_current_span("file-hydration"):
-            for m in messages:
-                if not isinstance(m, schema.AugmentedUserMessage):
-                    continue
-
-                for input_content in m.content:
-                    if isinstance(input_content, ag_ui.core.TextInputContent):
-                        continue
-                    if isinstance(input_content, ag_ui.core.BinaryInputContent):
-                        raise HTTPException(
-                            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                            detail="Binary input content is not supported",
-                        )
-
-                    file, content = await file_handler.add_or_read(input_content, user_id=user.id)
-                    input_content.source = ag_ui.core.InputContentDataSource(
-                        value=await as_awaitable(lambda c: base64.b64encode(c).decode(), content),
-                        mime_type=file.mime_type,
-                    )
-                    input_content.metadata = WrappedMetadata(raw=input_content.metadata, file_id=file.id)
+        await hydrate_files(messages, user=user, file_handler=file_handler)
 
         run_agent_input = ag_ui.core.RunAgentInput(
             thread_id=thread.id,
@@ -130,6 +112,33 @@ def make_router(
                 await database.update_thread(thread)
 
         return await agent_handler.run(thread.agent_id, run_agent_input, callback=callback)
+
+    @traced
+    async def hydrate_files(
+        messages: list[schema.AugmentedMessage],
+        *,
+        user: schema.User,
+        file_handler: FileHandler,
+    ) -> None:
+        for m in messages:
+            if not isinstance(m, schema.AugmentedUserMessage):
+                continue
+
+            for input_content in m.content:
+                if isinstance(input_content, ag_ui.core.TextInputContent):
+                    continue
+                if isinstance(input_content, ag_ui.core.BinaryInputContent):
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail="Binary input content is not supported",
+                    )
+
+                file, content = await file_handler.add_or_read(input_content, user_id=user.id)
+                input_content.source = ag_ui.core.InputContentDataSource(
+                    value=await as_awaitable(lambda c: base64.b64encode(c).decode(), content),
+                    mime_type=file.mime_type,
+                )
+                input_content.metadata = WrappedMetadata(raw=input_content.metadata, file_id=file.id)
 
     @router.post("/{threadId}/rename")
     async def rename_thread(

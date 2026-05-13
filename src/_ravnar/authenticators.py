@@ -28,7 +28,7 @@ class Authenticator(abc.ABC):
 class DebugAuthenticator(Authenticator):
     """Debug Authenticator"""
 
-    @traced()
+    @traced
     async def authenticate(self, request: Request) -> schema.User:
         body = await request.body()
         try:
@@ -53,13 +53,12 @@ class ForwardedUserAuthenticator(Authenticator):
     """Forwarded User Authenticator"""
 
     def __init__(self, *, id_header: str = "X-Forwarded-User"):
-        @traced()
+        @traced
         async def authenticate(id: str = Depends(APIKeyHeader(name=id_header))) -> schema.User:
             return schema.User(id=id)
 
         self.authenticate = authenticate  # type: ignore[method-assign]
 
-    @traced()
     async def authenticate(self) -> schema.User:  # type: ignore[empty-body]
         # This is here to appease the ABC. The actual functionality is set in __init__
         pass
@@ -174,6 +173,6 @@ class BearerTokenAuthenticator(Authenticator):
     def __init__(self, token_validator: TokenValidator) -> None:
         self._token_validator = token_validator
 
-    @traced()
+    @traced
     async def authenticate(self, token: str = Depends(get_bearer_token)) -> schema.User:
         return await as_awaitable(self._token_validator, token)
