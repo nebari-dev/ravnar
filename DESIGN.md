@@ -50,33 +50,46 @@ storage:
 
 ### API Router Construction
 
-`make_api_router` in `src/_ravnar/api/__init__.py` currently constructs the main API router with sub-routers for threads, files, and agents. It is changed to accept `storage_config` and conditionally include threads and files based on `storage_config.enabled`. The router also owns the database lifecycle: when storage is enabled, it constructs the `Database`, registers startup/shutdown event handlers for setup and teardown, and includes the threads and files sub-routers.
-
-The function no longer returns a `Database` to the caller — it is fully self-contained.
+`make_api_router` in `src/_ravnar/api/__init__.py` is refactored so that all stateful concerns (database construction, file handler, threads and files routers, database lifecycle) live in a dedicated `_make_stateful_router` function. `make_router` delegates to it when storage is enabled; otherwise it only includes the stateless-capable routers.
 
 The agents sub-router (`/api/agents`) is **always included** regardless of the storage flag, since stateless agent runs do not require storage.
 
 ```python
+def _make_stateful_router(
+    *,
+    storage_config: StorageConfig,
+    agent_handler: AgentHandler,
+    authenticated_user: Callable[..., Any],
+) -> schema.APIRouter:
+    database = Database(url=str(storage_config.database_dsn))
+    file_handler = FileHandler(root=storage_config.file_storage_path, database=database)
+
+    router = schema.APIRouter(tags=["Stateful"])
+    router.add_event_handler("startup", database.setup)
+    router.add_event_handler("shutdown", database.teardown)
+
+    router.include_router(make_files_router(file_handler=file_handler, authenticated_user=authenticated_user), prefix="/files")
+    router.include_router(make_threads_router(database=database, file_handler=file_handler, agent_handler=agent_handler, authenticated_user=authenticated_user), prefix="/threads")
+
+    return router
+
+
 def make_router(
     *,
     storage_config: StorageConfig,
     agent_handler: AgentHandler,
     authenticated_user: Callable[..., Any],
 ) -> schema.APIRouter:
-    storage_enabled = storage_config.enabled
     router = schema.APIRouter(tags=["API"], dependencies=[Depends(authenticated_user)])
 
     # ... /user and /config endpoints (always present) ...
 
-    if storage_enabled:
-        database = Database(url=str(storage_config.database_dsn))
-        file_handler = FileHandler(root=storage_config.file_storage_path, database=database)
-
-        router.add_event_handler("startup", database.setup)
-        router.add_event_handler("shutdown", database.teardown)
-
-        router.include_router(make_files_router(file_handler=file_handler, authenticated_user=authenticated_user), prefix="/files")
-        router.include_router(make_threads_router(database=database, file_handler=file_handler, agent_handler=agent_handler, authenticated_user=authenticated_user), prefix="/threads")
+    if storage_config.enabled:
+        router.include_router(_make_stateful_router(
+            storage_config=storage_config,
+            agent_handler=agent_handler,
+            authenticated_user=authenticated_user,
+        ))
 
     router.include_router(make_agents_router(agent_handler=agent_handler, authenticated_user=authenticated_user), prefix="/agents")
 
@@ -85,18 +98,13 @@ def make_router(
 
 ### App Construction (`_make_app`)
 
-`_make_app` in `src/_ravnar/core.py` is simplified: it no longer constructs `Database` or `FileHandler`, and no longer manually wires the lifespan. Instead it passes `config.storage` to `make_api_router`, which handles everything internally. The app lifespan becomes a simple no-op.
+`_make_app` in `src/_ravnar/core.py` is simplified: it no longer constructs `Database` or `FileHandler`, and no longer wires a custom lifespan. Instead it passes `config.storage` to `make_api_router`, which handles everything internally.
 
 ```python
 def _make_app(self, config: BaseConfig) -> FastAPI:
-    @contextlib.asynccontextmanager
-    async def lifespan(_: Any) -> AsyncIterator[None]:
-        yield
-
     app = FastAPI(
         title="ravnar",
         version=__version__,
-        lifespan=lifespan,
         root_path=config.server.root_path,
     )
 
