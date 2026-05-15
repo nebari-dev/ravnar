@@ -50,33 +50,20 @@ storage:
 
 ### API Router Construction
 
-`make_api_router` in `src/_ravnar/api/__init__.py` currently constructs the main API router with sub-routers for threads, files, and agents. It is changed to conditionally include threads and files based on `storage.enabled`.
+`make_api_router` in `src/_ravnar/api/__init__.py` currently constructs the main API router with sub-routers for threads, files, and agents. It is changed to accept `storage_config` and conditionally include threads and files based on `storage_config.enabled`. The router also owns the database lifecycle: when storage is enabled, it constructs the `Database`, registers startup/shutdown event handlers for setup and teardown, and includes the threads and files sub-routers.
 
-The function signature gains an `enabled: bool` parameter. When `True`, it behaves exactly as today: constructs `Database` and `FileHandler`, includes threads and files routers, and returns `(router, database)`. When `False`, it skips database and file handler construction, excludes threads and files routers, and returns `(router, None)`.
+The function no longer returns a `Database` to the caller — it is fully self-contained.
 
 The agents sub-router (`/api/agents`) is **always included** regardless of the storage flag, since stateless agent runs do not require storage.
 
 ```python
 def make_router(
     *,
-    storage_enabled: bool,
-    database: Database | None,
-    file_handler: FileHandler | None,
-    agent_handler: AgentHandler,
-    authenticated_user: Callable[..., Any],
-) -> tuple[schema.APIRouter, Database | None]:
-```
-
-Wait — if `storage_enabled=False`, the caller won't have a `Database` or `FileHandler` to pass in. So the constructor of those objects moves *into* `make_api_router`:
-
-```python
-def make_router(
-    *,
-    storage_enabled: bool,
     storage_config: StorageConfig,
     agent_handler: AgentHandler,
     authenticated_user: Callable[..., Any],
-) -> tuple[schema.APIRouter, Database | None]:
+) -> schema.APIRouter:
+    storage_enabled = storage_config.enabled
     router = schema.APIRouter(tags=["API"], dependencies=[Depends(authenticated_user)])
 
     # ... /user and /config endpoints (always present) ...
@@ -85,31 +72,31 @@ def make_router(
         database = Database(url=str(storage_config.database_dsn))
         file_handler = FileHandler(root=storage_config.file_storage_path, database=database)
 
+        router.add_event_handler("startup", database.setup)
+        router.add_event_handler("shutdown", database.teardown)
+
         router.include_router(make_files_router(file_handler=file_handler, authenticated_user=authenticated_user), prefix="/files")
         router.include_router(make_threads_router(database=database, file_handler=file_handler, agent_handler=agent_handler, authenticated_user=authenticated_user), prefix="/threads")
-    else:
-        database = None
 
     router.include_router(make_agents_router(agent_handler=agent_handler, authenticated_user=authenticated_user), prefix="/agents")
 
-    return router, database
+    return router
 ```
 
 ### App Construction (`_make_app`)
 
-`_make_app` in `src/_ravnar/core.py` is updated to:
-
-1. Read `config.storage.enabled`.
-2. Pass `storage_enabled` and `storage_config` to `make_api_router` instead of constructing `Database` and `FileHandler` itself.
-3. Receive the `Database | None` from `make_api_router`.
-4. Conditionally wire the lifespan: if `database` is not `None`, pass it to `SetupTeardownMixin.lifespan_factory(database)`; otherwise use an empty lifespan.
+`_make_app` in `src/_ravnar/core.py` is simplified: it no longer constructs `Database` or `FileHandler`, and no longer manually wires the lifespan. Instead it passes `config.storage` to `make_api_router`, which handles everything internally. The app lifespan becomes a simple no-op.
 
 ```python
 def _make_app(self, config: BaseConfig) -> FastAPI:
+    @contextlib.asynccontextmanager
+    async def lifespan(_: Any) -> AsyncIterator[None]:
+        yield
+
     app = FastAPI(
         title="ravnar",
         version=__version__,
-        lifespan=...,  # see below
+        lifespan=lifespan,
         root_path=config.server.root_path,
     )
 
@@ -117,22 +104,12 @@ def _make_app(self, config: BaseConfig) -> FastAPI:
 
     agent_handler = AgentHandler(config.agents)
 
-    api_router, database = make_api_router(
-        storage_enabled=config.storage.enabled,
+    api_router = make_api_router(
         storage_config=config.storage,
         agent_handler=agent_handler,
         authenticated_user=authenticated_user,
     )
     app.include_router(api_router, prefix="/api")
-
-    # Wire lifespan
-    if database is not None:
-        lifespan_ctx = SetupTeardownMixin.lifespan_factory(database)
-    else:
-        @contextlib.asynccontextmanager
-        async def lifespan_ctx(_: Any) -> AsyncIterator[None]:
-            yield
-    app.router.lifespan_context = lifespan_ctx
 
     return app
 ```
@@ -199,6 +176,6 @@ Logging and tracing are configured at the top of `Ravnar.__init__` independently
 | Tradeoff / Risk | Mitigation |
 |---|---|
 | `database_dsn` and `file_storage_path` default factories still run in stateless mode, potentially creating `.ravnar_local/` directories | Accepted as cosmetic. Can be hardened later with a field validator that skips default evaluation when `enabled=False`. |
-| `make_api_router` now has dual responsibility: routing + storage construction | The function already constructed `Database` and `FileHandler` indirectly via its callers. Making it the sole owner of these objects is a net improvement in cohesion. The return type changes, but all callers are internal. |
+| `make_api_router` now owns storage construction and lifecycle | Previously `Database` was constructed in `_make_app` and passed in. Moving ownership into `make_api_router` keeps all storage concerns in one place. Database lifecycle is handled via router-level startup/shutdown events, eliminating the need for `_make_app` to wire the lifespan. |
 | No independent toggles for database vs. file storage | Out of scope. The design assumes "stateless" is an all-or-nothing concept. If a use case for partial statelessness emerges, the flag can be split later. |
 | Test coverage for stateless mode | Tests should be added: a stateless app client that verifies agents run works, threads/files return 404, and `/api/config` returns `storage_enabled: false`. |
