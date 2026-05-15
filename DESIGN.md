@@ -61,16 +61,32 @@ def _make_stateful_router(
     agent_handler: AgentHandler,
     authenticated_user: Callable[..., Any],
 ) -> schema.APIRouter:
+    # These are the same Database and FileHandler currently constructed in _make_app.
+    # Moving them here keeps all storage concerns in one place.
     database = Database(url=str(storage_config.database_dsn))
     file_handler = FileHandler(root=storage_config.file_storage_path, database=database)
 
+    # The database lifecycle is owned by this router's lifespan (same SetupTeardownMixin
+    # pattern currently used on the FastAPI app in _make_app). When this router is not
+    # included (stateless mode), the database is never constructed and no lifespan runs.
     router = schema.APIRouter(
         tags=["Stateful"],
         lifespan=SetupTeardownMixin.lifespan_factory(database),
     )
 
-    router.include_router(make_files_router(file_handler=file_handler, authenticated_user=authenticated_user), prefix="/files")
-    router.include_router(make_threads_router(database=database, file_handler=file_handler, agent_handler=agent_handler, authenticated_user=authenticated_user), prefix="/threads")
+    router.include_router(
+        make_files_router(file_handler=file_handler, authenticated_user=authenticated_user),
+        prefix="/files",
+    )
+    router.include_router(
+        make_threads_router(
+            database=database,
+            file_handler=file_handler,
+            agent_handler=agent_handler,
+            authenticated_user=authenticated_user,
+        ),
+        prefix="/threads",
+    )
 
     return router
 
@@ -83,7 +99,18 @@ def make_router(
 ) -> schema.APIRouter:
     router = schema.APIRouter(tags=["API"], dependencies=[Depends(authenticated_user)])
 
-    # ... /user and /config endpoints (always present) ...
+    @router.get("/user")
+    async def get_user(
+        user: schema.User = Depends(authenticated_user),
+    ) -> schema.User:
+        return user
+
+    @router.get("/config")
+    async def get_config() -> schema.APIConfig:
+        return schema.APIConfig(
+            agents=agent_handler.configs,
+            storage_enabled=storage_config.enabled,
+        )
 
     if storage_config.enabled:
         router.include_router(_make_stateful_router(
@@ -92,14 +119,17 @@ def make_router(
             authenticated_user=authenticated_user,
         ))
 
-    router.include_router(make_agents_router(agent_handler=agent_handler, authenticated_user=authenticated_user), prefix="/agents")
+    router.include_router(
+        make_agents_router(agent_handler=agent_handler, authenticated_user=authenticated_user),
+        prefix="/agents",
+    )
 
     return router
 ```
 
 ### App Construction (`_make_app`)
 
-`_make_app` in `src/_ravnar/core.py` is simplified: it no longer constructs `Database` or `FileHandler`, and no longer wires a custom lifespan. Instead it passes `config.storage` to `make_api_router`, which handles everything internally.
+`_make_app` in `src/_ravnar/core.py` is simplified: it no longer constructs `Database` or `FileHandler`, and no longer wires a custom lifespan. Instead it passes `config.storage` to `make_api_router`, which handles everything internally — including constructing `Database`/`FileHandler` and owning the database lifecycle via the stateful sub-router's lifespan.
 
 ```python
 def _make_app(self, config: BaseConfig) -> FastAPI:
@@ -109,7 +139,33 @@ def _make_app(self, config: BaseConfig) -> FastAPI:
         root_path=config.server.root_path,
     )
 
-    # ... CORS, authenticator, health/version/redirect routes ...
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=config.security.cors.allowed_origins,
+        allow_headers=[*config.security.cors.allowed_headers],
+        allow_methods=["*"],
+    )
+
+    if config.security.authenticator is None:
+        async def authenticated_user() -> schema.User:
+            return schema.User.default()
+    else:
+        authenticator = config.security.authenticator()
+        authenticated_user = tracer.start_as_current_span("authenticate")(
+            resolve_forward_references(authenticator.authenticate)
+        )
+
+    @app.get("/", include_in_schema=False)
+    async def base_redirect() -> RedirectResponse:
+        return RedirectResponse(f"{app.root_path}/docs", status_code=status.HTTP_302_FOUND)
+
+    @app.get("/health")
+    async def health() -> Response:
+        return Response(b"", status_code=status.HTTP_200_OK)
+
+    @app.get("/version")
+    async def version() -> str:
+        return __version__
 
     agent_handler = AgentHandler(config.agents)
 
@@ -119,6 +175,11 @@ def _make_app(self, config: BaseConfig) -> FastAPI:
         authenticated_user=authenticated_user,
     )
     app.include_router(api_router, prefix="/api")
+
+    # OTLP instrumentation (unchanged)
+    included_prefixes = ["/auth", "/api"]
+    excluded_urls = rf"^https?://[^/]+(?:/?$|/(?!({'|'.join(p.lstrip('/') for p in included_prefixes)}/).*$)"
+    FastAPIInstrumentor.instrument_app(app, excluded_urls=excluded_urls)
 
     return app
 ```
@@ -133,13 +194,7 @@ class APIConfig(BaseModel):
     storage_enabled: bool
 ```
 
-The `/api/config` endpoint in `make_api_router` reads the flag and includes it:
-
-```python
-@router.get("/config")
-async def get_config() -> schema.APIConfig:
-    return schema.APIConfig(agents=agent_handler.configs, storage_enabled=storage_enabled)
-```
+The `/api/config` endpoint in `make_router` (shown above) reads `storage_config.enabled` directly and includes it in the response.
 
 This field is **always present** (`true` or `false`), allowing API consumers to discover the mode and decide which endpoints are safe to call.
 
