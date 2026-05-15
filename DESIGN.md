@@ -64,9 +64,10 @@ def _make_stateful_router(
     database = Database(url=str(storage_config.database_dsn))
     file_handler = FileHandler(root=storage_config.file_storage_path, database=database)
 
-    router = schema.APIRouter(tags=["Stateful"])
-    router.add_event_handler("startup", database.setup)
-    router.add_event_handler("shutdown", database.teardown)
+    router = schema.APIRouter(
+        tags=["Stateful"],
+        lifespan=SetupTeardownMixin.lifespan_factory(database),
+    )
 
     router.include_router(make_files_router(file_handler=file_handler, authenticated_user=authenticated_user), prefix="/files")
     router.include_router(make_threads_router(database=database, file_handler=file_handler, agent_handler=agent_handler, authenticated_user=authenticated_user), prefix="/threads")
@@ -184,6 +185,6 @@ Logging and tracing are configured at the top of `Ravnar.__init__` independently
 | Tradeoff / Risk | Mitigation |
 |---|---|
 | `database_dsn` and `file_storage_path` default factories still run in stateless mode, potentially creating `.ravnar_local/` directories | Accepted as cosmetic. Can be hardened later with a field validator that skips default evaluation when `enabled=False`. |
-| `make_api_router` now owns storage construction and lifecycle | Previously `Database` was constructed in `_make_app` and passed in. Moving ownership into `make_api_router` keeps all storage concerns in one place. Database lifecycle is handled via router-level startup/shutdown events, eliminating the need for `_make_app` to wire the lifespan. |
+| `make_api_router` now owns storage construction and lifecycle | Previously `Database` was constructed in `_make_app` and passed in. Moving ownership into `_make_api_router` keeps all storage concerns in one place. The `_make_stateful_router` owns the database lifecycle via the router's `lifespan` parameter (same pattern `_make_app` currently uses), eliminating the need for `_make_app` to manage it. |
 | No independent toggles for database vs. file storage | Out of scope. The design assumes "stateless" is an all-or-nothing concept. If a use case for partial statelessness emerges, the flag can be split later. |
 | Test coverage for stateless mode | Tests should be added: a stateless app client that verifies agents run works, threads/files return 404, and `/api/config` returns `storage_enabled: false`. |
