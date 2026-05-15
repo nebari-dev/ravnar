@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Design: Dynamic Agent Registration</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --fg: #c9d1d9;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --border: #30363d;
+      --code-bg: #161b22;
+      --section-bg: #161b22;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 2rem 1rem;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      line-height: 1.6;
+      max-width: 900px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    h1, h2, h3 { color: #f0f6fc; margin-top: 2rem; }
+    h1 { border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+    h2 { border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; }
+    a { color: var(--accent); }
+    code, pre {
+      background: var(--code-bg);
+      border-radius: 6px;
+      padding: 0.2em 0.4em;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 0.9em;
+    }
+    pre { padding: 1rem; overflow-x: auto; }
+    ul, ol { padding-left: 1.5rem; }
+    blockquote {
+      border-left: 4px solid var(--accent);
+      margin: 1rem 0;
+      padding: 0.5rem 1rem;
+      background: var(--section-bg);
+      border-radius: 0 6px 6px 0;
+    }
+    hr { border: 0; border-top: 1px solid var(--border); margin: 2rem 0; }
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+    th, td { border: 1px solid var(--border); padding: 0.5rem; text-align: left; }
+    th { background: var(--section-bg); }
+  </style>
+</head>
+<body>
+  <h1>Design: Dynamic Agent Registration</h1>
+
+  <h2>Summary</h2>
+  <p>
+    Add runtime CRUD endpoints to register and unregister agents without restarting the server.
+    Agent configuration is split into <strong>static</strong> (loaded from YAML at startup, unchanged from today)
+    and <strong>dynamic</strong> (registered at runtime via API, ephemeral — lost on restart).
+    The CRUD endpoints are gated behind a feature flag in the YAML config.
+    The existing <code>GET /api/config</code> response is slimmed down, and a new <code>GET /api/agents</code>
+    endpoint provides the merged view of all available agents.
+  </p>
+
+  <h2>Goals</h2>
+  <ul>
+    <li>Allow runtime registration of new agents via API without a server restart.</li>
+    <li>Support registering any agent type that can be expressed as an <code>ImportStringWithParams</code> blob (the same mechanism used by static config).</li>
+    <li>Provide a feature flag to disable dynamic agent registration entirely.</li>
+    <li>Keep static agents fully intact — they cannot be deleted via the API.</li>
+    <li>Ensure the server always has at least one usable agent (static or dynamic-enabled).</li>
+    <li>Preserve backward compatibility for the static config shape as much as possible (alpha — breaking changes acceptable).</li>
+  </ul>
+
+  <h2>Non-Goals</h2>
+  <ul>
+    <li>Persistent storage for dynamic agents — they are in-memory only (ephemeral).</li>
+    <li>Agent update endpoint — delete + recreate is the pattern.</li>
+    <li>Authorization / access control for the CRUD endpoints (will be added later as an admin feature).</li>
+    <li>Handling threads that reference a now-deleted agent (deferred to a future design).</li>
+    <li>UI changes — API-only; the frontend will be updated separately.</li>
+  </ul>
+
+  <h2>Background / Motivation</h2>
+  <p>
+    Ravnar currently loads all agents from YAML configuration at startup. Adding or removing agents requires
+    editing the config file and restarting the server. For multi-tenant or dynamic environments, this is
+    too inflexible. Operators need the ability to register new agents (e.g., SSE backends, new AI models)
+    at runtime through an API.
+  </p>
+  <p>
+    The existing agent config mechanism uses <code>ImportStringWithParams</code> — a Pydantic model that
+    accepts a Python import path (<code>cls_or_fn</code>) and a <code>params</code> dict. This model is
+    fully JSON-serializable and is already the standard way to configure agents. Dynamic registration
+    reuses this same mechanism, so any agent type that can be defined in YAML can also be registered via API.
+  </p>
+
+  <h2>Design</h2>
+
+  <h3>1. Config Model Changes</h3>
+
+  <p>
+    The current <code>BaseConfig.agents</code> field is a flat dict:
+  </p>
+  <pre>agents: dict[str, ImportStringWithParams[Agent]]</pre>
+
+  <p>This is restructured into a nested config:</p>
+
+  <pre>
+class DynamicAgentConfig(BaseModel, RenderableMixin):
+    enabled: bool = False
+
+
+class AgentConfig(BaseModel, RenderableMixin):
+    static: dict[str, ImportStringWithParams[Agent]] = Field(
+        default_factory=lambda: {
+            "default": ImportStringWithParams(cls_or_fn=DefaultAgent),
+        }
+    )
+    dynamic: DynamicAgentConfig = Field(default_factory=DynamicAgentConfig)
+
+    @model_validator(mode="after")
+    def _ensure_not_agentless(self) -> Self:
+        if not self.static and not self.dynamic.enabled:
+            raise ValueError(
+                "At least one static agent must be configured, or dynamic agents must be enabled."
+            )
+        return self
+  </pre>
+
+  <p>The <code>default_factory</code> preserves today's default: a single <code>default</code> agent using <code>DefaultAgent</code>.</p>
+  <p>The model validator prevents a dead-end configuration where there are no static agents <em>and</em> dynamic agents are disabled — which would leave the server with zero usable agents.</p>
+
+  <p>The corresponding YAML config changes from:</p>
+  <pre>
+agents:
+  gpt:
+    cls_or_fn: ravnar.agents.PydanticAiAgentWrapper
+    params: { ... }
+  </pre>
+
+  <p>To:</p>
+  <pre>
+agents:
+  static:
+    gpt:
+      cls_or_fn: ravnar.agents.PydanticAiAgentWrapper
+      params: { ... }
+  dynamic:
+    enabled: false
+  </pre>
+
+  <p>
+    The existing <code>BaseConfig</code> field type changes from <code>dict[str, ImportStringWithParams[Agent]]</code>
+    to <code>AgentConfig</code>. Env var override becomes <code>RAVNAR_AGENTS__DYNAMIC__ENABLED=true</code>.
+  </p>
+
+  <h3>2. API Response Models</h3>
+
+  <pre>
+class APIConfig(BaseModel):
+    dynamic_agents_enabled: bool
+
+
+class AgentInfo(BaseModel):
+    id: str
+    capabilities: ag_ui.core.AgentCapabilities
+    quick_prompts: list[QuickPrompt]
+  </pre>
+
+  <p>
+    Note: <code>AgentInfo</code> replaces the old <code>AgentConfig</code> schema name (which now refers to the config model above).
+    Rename to avoid ambiguity: <code>schema.api.AgentConfig</code> → <code>schema.api.AgentInfo</code>.
+  </p>
+
+  <h3>3. API Endpoints</h3>
+
+  <table>
+    <tr><th>Method</th><th>Path</th><th>Auth</th><th>Description</th></tr>
+    <tr>
+      <td><code>GET</code></td>
+      <td><code>/api/config</code></td>
+      <td>Yes</td>
+      <td>
+        Returns <code>{dynamicAgentsEnabled: bool}</code>.
+        Agent list removed from this endpoint — moved to <code>/api/agents</code>.
+      </td>
+    </tr>
+    <tr>
+      <td><code>GET</code></td>
+      <td><code>/api/agents</code></td>
+      <td>Yes</td>
+      <td>
+        Returns merged list of all agents (static + enabled dynamic).
+        Response: <code>list[AgentInfo]</code>.
+      </td>
+    </tr>
+    <tr>
+      <td><code>POST</code></td>
+      <td><code>/api/agents</code></td>
+      <td>Yes</td>
+      <td>
+        Register a new dynamic agent. Gated — returns <strong>403 Forbidden</strong> if
+        <code>agents.dynamic.enabled</code> is <code>false</code>.
+        Body: <code>{id: str, agent: ImportStringWithParams}</code>.
+        Rejects duplicate IDs (including static agent IDs) with <strong>409 Conflict</strong>.
+      </td>
+    </tr>
+    <tr>
+      <td><code>DELETE</code></td>
+      <td><code>/api/agents/{id}</code></td>
+      <td>Yes</td>
+      <td>
+        Unregister a dynamic agent. Gated — returns <strong>403 Forbidden</strong> if
+        <code>agents.dynamic.enabled</code> is <code>false</code>.
+        Returns <strong>403 Forbidden</strong> if the ID belongs to a static agent
+        (static agents are protected). Returns <strong>404 Not Found</strong> if the
+        dynamic agent ID does not exist.
+      </td>
+    </tr>
+    <tr>
+      <td><code>POST</code></td>
+      <td><code>/api/agents/{id}/run</code></td>
+      <td>Yes</td>
+      <td>Unchanged — runs any agent (static or dynamic) by ID. Always available.</td>
+    </tr>
+  </table>
+
+  <h4>Request/Response examples</h4>
+
+  <pre>
+POST /api/agents
+Content-Type: application/json
+
+{
+  "id": "my-sse-agent",
+  "agent": {
+    "cls_or_fn": "_ravnar.agents.SSEAgent",
+    "params": {
+      "method": "POST",
+      "url": "https://example.com/agent-stream"
+    }
+  }
+}
+
+→ 201 Created
+
+---
+
+POST /api/agents
+Content-Type: application/json
+
+{
+  "id": "gpt",
+  "agent": { "cls_or_fn": "..." }
+}
+
+→ 409 Conflict (ID "gpt" is already taken by a static agent)
+
+---
+
+DELETE /api/agents/gpt
+→ 403 Forbidden (gpt is a static agent)
+
+---
+
+DELETE /api/agents/nonexistent
+→ 404 Not Found
+
+---
+
+GET /api/agents
+→ 200 OK
+[
+  {"id": "gpt", "capabilities": {...}, "quickPrompts": [...]},
+  {"id": "default", "capabilities": {...}, "quickPrompts": [...]},
+  {"id": "my-sse-agent", "capabilities": {...}, "quickPrompts": [...]}
+]
+  </pre>
+
+  <h3>4. AgentHandler Changes</h3>
+
+  <p>The <code>AgentHandler</code> class is extended with two agent pools:</p>
+
+  <pre>
+class AgentHandler:
+    def __init__(self, agent_config: AgentConfig) -> None:
+        # Static agents — loaded from config, never modified
+        self._static_agents: dict[str, Agent] = {
+            id: factory()
+            for id, factory in agent_config.static.items()
+        }
+        # Dynamic agents — registered at runtime, ephemeral
+        self._dynamic_agents: dict[str, Agent] = {}
+        self._dynamic_agent_factories: dict[str, Callable[[], Agent]] = {}
+        self._event_encoder = ag_ui.encoder.EventEncoder()
+        self._dynamic_enabled = agent_config.dynamic.enabled
+
+    @property
+    def configs(self) -> list[schema.AgentInfo]:
+        # No longer cached — the set can change at runtime
+        agents = dict(self._static_agents)
+        if self._dynamic_enabled:
+            agents.update(self._dynamic_agents)
+        return [
+            schema.AgentInfo(id=id, capabilities=agent.get_capabilities(),
+                             quick_prompts=agent.get_quick_prompts())
+            for id, agent in agents.items()
+        ]
+
+    def assert_available(self, agent_id: str) -> None:
+        if agent_id not in self._static_agents and agent_id not in self._dynamic_agents:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+
+    def add_agent(self, agent_id: str, factory: Callable[[], Agent]) -> None:
+        if agent_id in self._static_agents or agent_id in self._dynamic_agents:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Agent ID already exists")
+        self._dynamic_agents[agent_id] = factory()
+        self._dynamic_agent_factories[agent_id] = factory
+
+    def remove_agent(self, agent_id: str) -> None:
+        if agent_id in self._static_agents:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                                detail="Static agents cannot be deleted")
+        if agent_id not in self._dynamic_agents:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+        del self._dynamic_agents[agent_id]
+        del self._dynamic_agent_factories[agent_id]
+  </pre>
+
+  <p>
+    The factory is retained (<code>_dynamic_agent_factories</code>) to support potential future persistence;
+    currently dynamic agents are ephemeral and lost on restart.
+  </p>
+
+  <h3>5. Gating the CRUD Endpoints</h3>
+
+  <p>
+    The <code>agents.py</code> router receives the <code>AgentHandler</code> and inspects
+    <code>handler.dynamic_enabled</code>. The <code>POST</code> and <code>DELETE</code>
+    endpoints return <strong>403 Forbidden</strong> immediately if dynamic agents are disabled.
+    The <code>GET /api/agents</code> endpoint is always available (it returns whatever agents exist).
+  </p>
+
+  <pre>
+@router.post("")
+async def register_agent(
+    *,
+    handler: AgentHandler = Depends(get_agent_handler),
+    data: schema.RegisterAgentData,
+) -> schema.AgentInfo:
+    if not handler.dynamic_enabled:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Dynamic agent registration is disabled")
+    agent = data.agent()
+    handler.add_agent(data.id, lambda: data.agent())
+    return schema.AgentInfo(
+        id=data.id,
+        capabilities=agent.get_capabilities(),
+        quick_prompts=agent.get_quick_prompts(),
+    )
+  </pre>
+
+  <h3>6. </h3>
+
+  <p>
+    The <code>schema.api.AgentConfig</code> model is renamed to <code>AgentInfo</code> to
+    free the name for the new config model in <code>config.py</code>. The old
+    <code>APIConfig.agents</code> field is removed; the new <code>APIConfig</code> only
+    carries <code>dynamic_agents_enabled</code>.
+  </p>
+
+  <h2>Tradeoffs &amp; Risks</h2>
+
+  <h3>Ephemeral dynamic agents</h3>
+  <p>
+    Dynamic agents are in-memory only. A server restart loses all registered agents.
+    This is intentional for now — the user explicitly requested ephemeral storage.
+    If persistence is needed later, the dynamic agent configs can be stored in the database
+    using <code>_dynamic_agent_factories</code> (already retained).
+  </p>
+
+  <h3>No authorization on CRUD endpoints</h3>
+  <p>
+    Anyone with API access can register arbitrary agents, including those that
+    import and execute arbitrary Python code (via <code>ImportStringWithParams</code>).
+    This is a known security gap. It is explicitly deferred because ravnar's
+    authenticator system is currently rudimentary and not ready for role-based
+    access. Authorization will be added later as an admin-only gate.
+  </p>
+
+  <h3>Status code for static agent deletion</h3>
+  <p>
+    The design uses <strong>403 Forbidden</strong> when attempting to delete a static agent.
+    Alternatives considered:
+  </p>
+  <ul>
+    <li><strong>409 Conflict</strong> — the resource's state (static) conflicts with the operation. Also defensible.</li>
+    <li><strong>400 Bad Request</strong> — too generic.</li>
+    <li><strong>405 Method Not Allowed</strong> — misleading because <code>DELETE</code> is a valid method on the endpoint.</li>
+  </ul>
+  <p>
+    403 was chosen because it most precisely conveys the server policy: "you are forbidden
+    from deleting static agents, full stop." This can be revisited if a different code
+    fits the wider API conventions better.
+  </p>
+
+  <h3>Breaking config change</h3>
+  <p>
+    The YAML config format changes from <code>agents: {id: {...}}</code> to
+    <code>agents: {static: {id: {...}}, dynamic: {enabled: ...}}</code>.
+    This is acceptable given alpha status, but the error message when a user provides
+    the old format should be clear. Pydantic's validation error on the new model
+    will naturally catch this, but it might be worth adding a pre-check validator
+    that detects the old flat structure and warns with a migration hint.
+  </p>
+
+  <h3>Merging the two agent pools</h3>
+  <p>
+    The <code>GET /api/agents</code> response does not distinguish static from dynamic agents.
+    This is intentional — the caller just needs the list of available agents. If differentiation
+    is needed later, a <code>source: "static" | "dynamic"</code> field can be added to <code>AgentInfo</code>.
+  </p>
+
+  <h3>Threads referencing deleted agents (deferred)</h3>
+  <p>
+    When a dynamic agent is deleted, existing threads that reference it become problematic.
+    Running a new run on that thread will fail with 404 because <code>assert_available</code>
+    will reject the agent ID. This is unresolved and deferred to a future design.
+    Options for that future design include: soft-delete/archive agents, reassign threads
+    to a fallback agent, or allow stale agent IDs on threads (failing at run time with a
+    user-friendly error).
+  </p>
+
+  <h2>Open Questions</h2>
+  <ul>
+    <li>
+      <strong>Threads and deleted agents:</strong> What should happen when a user tries to
+      view or run a thread whose agent has been deleted? Deferred to a future design session.
+    </li>
+    <li>
+      <strong>Status code for static agent deletion:</strong> Currently 403 Forbidden.
+      Acceptable, or prefer 409 Conflict?
+    </li>
+    <li>
+      <strong>Agent factory re-instantiation:</strong> <code>add_agent</code> currently
+      calls the factory immediately and also stores the factory. If the factory is expensive
+      (e.g., connects to external services on init), should instantiation be lazy?
+      For now, eager instantiation matches how static agents work.
+    </li>
+  </ul>
+
+</body>
+</html>
