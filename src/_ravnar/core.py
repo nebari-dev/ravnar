@@ -125,7 +125,6 @@ class AgentHandler:
         self._dynamic_enabled = agent_config.dynamic.enabled
 
     def infos(self) -> list[schema.AgentInfo]:
-        """Return info for all available agents (static + dynamic)."""
         agents = dict(self._static_agents)
         if self._dynamic_enabled:
             agents.update(self._dynamic_agents)

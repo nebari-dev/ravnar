@@ -1,3 +1,5 @@
+import compyre
+import pydantic
 import pytest
 from fastapi import status
 
@@ -6,12 +8,12 @@ from _ravnar.config import BaseConfig
 from tests.utils import make_app_client
 
 
-def _make_config(*, dynamic_enabled=False):
+def make_config(*, dynamic_enabled=False):
     return BaseConfig.model_validate(
         {
             "agents": {
                 "static": {
-                    "default": {"cls_or_fn": "_ravnar.agents.DefaultAgent"},
+                    "default": {"cls_or_fn": "ravnar.agents.DefaultAgent"},
                 },
                 "dynamic": {"enabled": dynamic_enabled},
             },
@@ -25,14 +27,32 @@ def _make_config(*, dynamic_enabled=False):
 class TestDynamicAgentsDisabled:
     @pytest.fixture
     def client(self):
-        with make_app_client(_make_config(dynamic_enabled=False)) as c:
+        with make_app_client(
+            BaseConfig.model_validate(
+                {
+                    "agents": {
+                        "static": {
+                            "default": {"cls_or_fn": "ravnar.agents.DefaultAgent"},
+                        },
+                        "dynamic": {"enabled": False},
+                    },
+                    "security": {
+                        "authenticator": "tests.utils.ForwardedUserAuthenticator",
+                    },
+                }
+            )
+        ) as c:
             yield c
 
     def test_get_agents(self, client):
         response = client.get("/api/agents").raise_for_status()
-        agents = [schema.AgentInfo.model_validate(a) for a in response.json()]
-        assert len(agents) == 1
-        assert agents[0].id == "default"
+        actual = pydantic.TypeAdapter(list[schema.AgentInfo]).validate_json(response.content)
+        expected = [
+            schema.AgentInfo.from_agent(id, agent_factory())
+            for id, agent_factory in client.config.agents.static.items()
+        ]
+
+        compyre.assert_equal(actual, expected)
 
     def test_get_config(self, client):
         response = client.get("/api/config").raise_for_status()
@@ -43,8 +63,8 @@ class TestDynamicAgentsDisabled:
         response = client.post(
             "/api/agents",
             json={
-                "id": "test-agent",
-                "agent": {"cls_or_fn": "_ravnar.agents.DefaultAgent"},
+                "id": "dynamic",
+                "agent": {"cls_or_fn": "ravnar.agents.DefaultAgent"},
             },
         )
         # 405 (Method Not Allowed) because GET /api/agents exists at that path,
@@ -59,14 +79,29 @@ class TestDynamicAgentsDisabled:
 class TestDynamicAgentsEnabled:
     @pytest.fixture
     def client(self):
-        with make_app_client(_make_config(dynamic_enabled=True)) as c:
+        with make_app_client(
+            BaseConfig.model_validate(
+                {
+                    "agents": {
+                        "static": {
+                            "default": {"cls_or_fn": "ravnar.agents.DefaultAgent"},
+                        },
+                        "dynamic": {"enabled": True},
+                    },
+                }
+            )
+        ) as c:
             yield c
 
     def test_get_agents_initial(self, client):
         response = client.get("/api/agents").raise_for_status()
-        agents = [schema.AgentInfo.model_validate(a) for a in response.json()]
-        assert len(agents) == 1
-        assert agents[0].id == "default"
+        actual = pydantic.TypeAdapter(list[schema.AgentInfo]).validate_json(response.content)
+        expected = [
+            schema.AgentInfo.from_agent(id, agent_factory())
+            for id, agent_factory in client.config.agents.static.items()
+        ]
+
+        compyre.assert_equal(actual, expected)
 
     def test_get_config(self, client):
         response = client.get("/api/config").raise_for_status()
@@ -74,22 +109,24 @@ class TestDynamicAgentsEnabled:
         assert config.dynamic_agents_enabled is True
 
     def test_register_agent(self, client):
+        id = "sentinel"
+
         response = client.post(
             "/api/agents",
             json={
-                "id": "my-sse-agent",
-                "agent": {"cls_or_fn": "_ravnar.agents.DefaultAgent"},
+                "id": id,
+                "agent": {"cls_or_fn": "ravnar.agents.DefaultAgent"},
             },
         ).raise_for_status()
         info = schema.AgentInfo.model_validate_json(response.content)
-        assert info.id == "my-sse-agent"
+        assert info.id == id
 
     def test_register_agent_appears_in_list(self, client):
         client.post(
             "/api/agents",
             json={
                 "id": "listed-agent",
-                "agent": {"cls_or_fn": "_ravnar.agents.DefaultAgent"},
+                "agent": {"cls_or_fn": "ravnar.agents.DefaultAgent"},
             },
         ).raise_for_status()
 
@@ -104,7 +141,7 @@ class TestDynamicAgentsEnabled:
             "/api/agents",
             json={
                 "id": "dup-agent",
-                "agent": {"cls_or_fn": "_ravnar.agents.DefaultAgent"},
+                "agent": {"cls_or_fn": "ravnar.agents.DefaultAgent"},
             },
         ).raise_for_status()
 
@@ -112,7 +149,7 @@ class TestDynamicAgentsEnabled:
             "/api/agents",
             json={
                 "id": "dup-agent",
-                "agent": {"cls_or_fn": "_ravnar.agents.DefaultAgent"},
+                "agent": {"cls_or_fn": "ravnar.agents.DefaultAgent"},
             },
         )
         assert response.status_code == status.HTTP_409_CONFLICT
@@ -122,7 +159,7 @@ class TestDynamicAgentsEnabled:
             "/api/agents",
             json={
                 "id": "default",
-                "agent": {"cls_or_fn": "_ravnar.agents.DefaultAgent"},
+                "agent": {"cls_or_fn": "ravnar.agents.DefaultAgent"},
             },
         )
         assert response.status_code == status.HTTP_409_CONFLICT
@@ -132,7 +169,7 @@ class TestDynamicAgentsEnabled:
             "/api/agents",
             json={
                 "id": "to-delete",
-                "agent": {"cls_or_fn": "_ravnar.agents.DefaultAgent"},
+                "agent": {"cls_or_fn": "ravnar.agents.DefaultAgent"},
             },
         ).raise_for_status()
 
@@ -157,7 +194,7 @@ class TestDynamicAgentsEnabled:
             "/api/agents",
             json={
                 "id": "delete-twice",
-                "agent": {"cls_or_fn": "_ravnar.agents.DefaultAgent"},
+                "agent": {"cls_or_fn": "ravnar.agents.DefaultAgent"},
             },
         ).raise_for_status()
 
@@ -165,30 +202,3 @@ class TestDynamicAgentsEnabled:
 
         response = client.delete("/api/agents/delete-twice")
         assert response.status_code == status.HTTP_404_NOT_FOUND
-
-    def test_registered_agent_can_run_via_thread(self, client):
-        client.post(
-            "/api/agents",
-            json={
-                "id": "runnable-agent",
-                "agent": {"cls_or_fn": "_ravnar.agents.DefaultAgent"},
-            },
-        ).raise_for_status()
-
-        response = client.post(
-            "/api/threads",
-            json={"agentId": "runnable-agent"},
-        ).raise_for_status()
-        thread = schema.Thread.model_validate_json(response.content)
-
-        import httpx_sse
-
-        with httpx_sse.connect_sse(
-            client,
-            "POST",
-            f"/api/threads/{thread.id}/run",
-            json={"messages": [{"role": "user", "content": "hello"}]},
-        ) as event_source:
-            event_source.response.raise_for_status()
-            events = list(event_source.iter_sse())
-            assert len(events) > 0

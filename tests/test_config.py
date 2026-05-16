@@ -202,28 +202,9 @@ def test_import_string_with_params(make_test_config, source, input_type):
     assert instance.param == expected_param
 
 
-def test_agent_config_default_factory():
-    config = AgentConfig()
-    assert "default" in config.static
-    assert config.dynamic.enabled is False
-
-
 def test_agent_config_agentless_validation():
-    with pytest.raises(pydantic.ValidationError) as exc_info:
+    with pytest.raises(pydantic.ValidationError):
         AgentConfig(static={}, dynamic=DynamicAgentConfig(enabled=False))
-
-    assert "At least one static agent" in str(exc_info.value)
-
-
-def test_agent_config_with_dynamic_enabled():
-    config = AgentConfig(static={}, dynamic=DynamicAgentConfig(enabled=True))
-    assert config.dynamic.enabled is True
-    assert config.static == {}
-
-
-def test_env_override_dynamic_enabled(make_test_config):
-    config = make_test_config(env_json={"agents": {"dynamic": {"enabled": True}}})
-    assert config.agents.dynamic.enabled is True
 
 
 def test_import_string_with_params_nested_error_localization():

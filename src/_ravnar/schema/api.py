@@ -22,7 +22,7 @@ __all__ = [
 
 import uuid
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Self
 
 import ag_ui.core
 from pydantic import BeforeValidator, Field, model_validator
@@ -44,6 +44,14 @@ class AgentInfo(BaseModel):
     id: str
     capabilities: ag_ui.core.AgentCapabilities
     quick_prompts: list[QuickPrompt]
+
+    @classmethod
+    def from_agent(cls, id: str, agent: Agent) -> Self:
+        return cls(
+            id=id,
+            capabilities=agent.get_capabilities(),
+            quick_prompts=agent.get_quick_prompts(),
+        )
 
 
 class APIConfig(BaseModel):
