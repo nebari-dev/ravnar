@@ -113,7 +113,7 @@ def make_router(
 
         return await agent_handler.run(thread.agent_id, run_agent_input, callback=callback)
 
-    @traced
+    @traced(name="file-hydration")
     async def hydrate_files(
         messages: list[schema.AugmentedMessage],
         *,

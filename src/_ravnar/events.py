@@ -6,7 +6,7 @@ import time
 import uuid
 from collections.abc import AsyncIterable, AsyncIterator
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, TypeVar, cast
+from typing import Any, TypeVar, cast
 
 import ag_ui.core
 import ag_ui.encoder
@@ -22,9 +22,6 @@ from . import orm
 from .utils import now
 
 tracer = trace.get_tracer(__name__)
-
-if TYPE_CHECKING:
-    pass
 
 TEvent = TypeVar("TEvent", bound=ag_ui.core.Event)
 
@@ -197,34 +194,13 @@ class EventProcessor:
 
                 processed_event = self._process_event(event)
                 if processed_event is not None:
-                    if isinstance(processed_event, ag_ui.core.RunErrorEvent):
-                        span.set_status(
-                            trace.StatusCode.ERROR,
-                            description=f"{processed_event.message} ({processed_event.code})",
-                        )
                     yield processed_event
         finally:
             span.end()
 
-    def _add_event_span(
-        self,
-        event: ag_ui.core.Event,
-        state: str | None = None,
-        reason: str | None = None,
-        **extra_attrs: Any,
-    ) -> None:
+    def _add_event_span(self, event: ag_ui.core.Event, **attributes: Any) -> None:
         span = trace.get_current_span()
-        attributes: dict[str, Any] = {"event.type": event.type}
-        if hasattr(event, "message_id"):
-            attributes["message_id"] = event.message_id
-        if hasattr(event, "tool_call_id"):
-            attributes["tool_call_id"] = event.tool_call_id
-        if state is not None:
-            attributes["event.state"] = state
-        if reason is not None:
-            attributes["event.reason"] = reason
-        attributes.update(extra_attrs)
-        span.add_event(event.type, attributes=attributes)
+        span.add_event(event.type, attributes={"event.type": event.type, **attributes})
 
     def _process_event(self, event: ag_ui.core.Event) -> ag_ui.core.Event | None:
         logger = self._logger.bind(event_type=event.type)
@@ -232,31 +208,28 @@ class EventProcessor:
         logger.debug("event", agent_event=LazyValue(event.model_dump))
 
         if self._progress == RunProgress.NOT_STARTED and not isinstance(event, ag_ui.core.RunStartedEvent):
-            self._add_event_span(event, state="dropped", reason="not started")
+            self._add_event_span(event, **{"event.state": "dropped", "event.reason": "not started"})
             return None
 
         if self._progress == RunProgress.FINISHED:
-            self._add_event_span(event, state="dropped", reason="finished")
+            self._add_event_span(event, **{"event.state": "dropped", "event.reason": "finished"})
             return None
 
-        state: str | None = None
-        reason: str | None = None
-        extra_attrs: dict[str, Any] = {}
+        attrs: dict[str, Any] = {}
 
         match event:
             # lifecycle events
             case ag_ui.core.RunStartedEvent():
                 if self._progress != RunProgress.NOT_STARTED:
-                    state = "dropped"
-                    reason = "already started"
+                    attrs = {"event.state": "dropped", "event.reason": "already started"}
                 elif (
                     event.thread_id != self._thread_id
                     or event.run_id != self._run_id
                     or event.parent_run_id != self._parent_run_id
                 ):
-                    state = "overridden"
-                    reason = "mismatching lifecycle data"
-                    extra_attrs = {
+                    attrs = {
+                        "event.state": "overridden",
+                        "event.reason": "mismatching lifecycle data",
                         "event_lifecycle_data": event.model_dump(
                             include={"thread_id", "run_id", "parent_run_id"}, mode="json"
                         ),
@@ -269,21 +242,28 @@ class EventProcessor:
                     self._progress = RunProgress.STARTED
             case ag_ui.core.RunFinishedEvent():
                 if event.thread_id != self._thread_id or event.run_id != self._run_id:
-                    state = "overridden"
-                    reason = "mismatching lifecycle data"
-                    extra_attrs = {
+                    attrs = {
+                        "event.state": "overridden",
+                        "event.reason": "mismatching lifecycle data",
                         "event_lifecycle_data": event.model_dump(include={"thread_id", "run_id"}, mode="json"),
                     }
                     event = self._override_event(event, thread_id=self._thread_id, run_id=self._run_id)
                 self._progress = RunProgress.FINISHED
             case ag_ui.core.RunErrorEvent():
+                span = trace.get_current_span()
+                span.set_status(
+                    trace.StatusCode.ERROR,
+                    description=f"{event.message} ({event.code})",
+                )
                 self._progress = RunProgress.FINISHED
             # text message events
             case ag_ui.core.TextMessageStartEvent():
                 if event.message_id in self._text_message_data:
-                    state = "overridden"
-                    reason = "already started"
-                    extra_attrs = {"message_id": event.message_id}
+                    attrs = {
+                        "event.state": "overridden",
+                        "event.reason": "already started",
+                        "message_id": event.message_id,
+                    }
                 self._text_message_data[event.message_id] = TextMessageData(
                     created_at=parse_timestamp(event.timestamp),
                     message_id=event.message_id,
@@ -291,33 +271,41 @@ class EventProcessor:
             case ag_ui.core.TextMessageContentEvent():
                 tmd = self._text_message_data.get(event.message_id)
                 if tmd is None:
-                    state = "dropped"
-                    reason = "not started"
-                    extra_attrs = {"message_id": event.message_id}
+                    attrs = {
+                        "event.state": "dropped",
+                        "event.reason": "not started",
+                        "message_id": event.message_id,
+                    }
                 elif tmd.finished:
-                    state = "dropped"
-                    reason = "finished"
-                    extra_attrs = {"message_id": event.message_id}
+                    attrs = {
+                        "event.state": "dropped",
+                        "event.reason": "finished",
+                        "message_id": event.message_id,
+                    }
                 else:
                     tmd.content_deltas.append(event.delta)
             case ag_ui.core.TextMessageEndEvent():
                 tmd = self._text_message_data.get(event.message_id)
                 if tmd is None:
-                    state = "dropped"
-                    reason = "not started"
-                    extra_attrs = {"message_id": event.message_id}
+                    attrs = {
+                        "event.state": "dropped",
+                        "event.reason": "not started",
+                        "message_id": event.message_id,
+                    }
                 elif tmd.finished:
-                    state = "dropped"
-                    reason = "already finished"
-                    extra_attrs = {"message_id": event.message_id}
+                    attrs = {
+                        "event.state": "dropped",
+                        "event.reason": "already finished",
+                        "message_id": event.message_id,
+                    }
                 else:
                     tmd.finished = True
             # tool call events
             case ag_ui.core.ToolCallStartEvent():
                 if event.tool_call_id in self._tool_call_data:
-                    state = "overridden"
-                    reason = "already started"
-                    extra_attrs = {
+                    attrs = {
+                        "event.state": "overridden",
+                        "event.reason": "already started",
                         "tool_call_id": event.tool_call_id,
                         "tool_call_name": event.tool_call_name,
                         "parent_message_id": event.parent_message_id,
@@ -342,32 +330,43 @@ class EventProcessor:
             case ag_ui.core.ToolCallArgsEvent():
                 tcd = self._tool_call_data.get(event.tool_call_id)
                 if tcd is None:
-                    state = "dropped"
-                    reason = "not started"
-                    extra_attrs = {"tool_call_id": event.tool_call_id}
+                    attrs = {
+                        "event.state": "dropped",
+                        "event.reason": "not started",
+                        "tool_call_id": event.tool_call_id,
+                    }
                 elif tcd.finished:
-                    state = "dropped"
-                    reason = "finished"
-                    extra_attrs = {"tool_call_id": event.tool_call_id}
+                    attrs = {
+                        "event.state": "dropped",
+                        "event.reason": "finished",
+                        "tool_call_id": event.tool_call_id,
+                    }
                 else:
                     tcd.arguments_delta.append(event.delta)
             case ag_ui.core.ToolCallEndEvent():
                 tcd = self._tool_call_data.get(event.tool_call_id)
                 if tcd is None:
-                    state = "dropped"
-                    reason = "not started"
-                    extra_attrs = {"tool_call_id": event.tool_call_id}
+                    attrs = {
+                        "event.state": "dropped",
+                        "event.reason": "not started",
+                        "tool_call_id": event.tool_call_id,
+                    }
                 elif tcd.finished:
-                    state = "dropped"
-                    reason = "already finished"
-                    extra_attrs = {"tool_call_id": event.tool_call_id}
+                    attrs = {
+                        "event.state": "dropped",
+                        "event.reason": "already finished",
+                        "tool_call_id": event.tool_call_id,
+                    }
                 else:
                     tcd.finished = True
             case ag_ui.core.ToolCallResultEvent():
                 if event.message_id in self._tool_result_data:
-                    state = "overridden"
-                    reason = "already received"
-                    extra_attrs = {"message_id": event.message_id, "tool_call_id": event.tool_call_id}
+                    attrs = {
+                        "event.state": "overridden",
+                        "event.reason": "already received",
+                        "message_id": event.message_id,
+                        "tool_call_id": event.tool_call_id,
+                    }
                 self._tool_result_data[event.message_id] = ToolResultData(
                     created_at=parse_timestamp(event.timestamp),
                     message_id=event.message_id,
@@ -380,8 +379,7 @@ class EventProcessor:
             case ag_ui.core.StateDeltaEvent():
                 new_state = self._apply_jsonpatch(self._state, event.delta)
                 if new_state is None:
-                    state = "dropped"
-                    reason = "invalid JSON patches"
+                    attrs = {"event.state": "dropped", "event.reason": "invalid JSON patches"}
                 else:
                     self._state = new_state
             # case ag_ui.core.MessagesSnapshotEvent():
@@ -390,9 +388,12 @@ class EventProcessor:
             # activity events
             case ag_ui.core.ActivitySnapshotEvent():
                 if event.message_id in self._messages and not event.replace:
-                    state = "dropped"
-                    reason = "message already exist"
-                    extra_attrs = {"message_id": event.message_id, "replace": event.replace}
+                    attrs = {
+                        "event.state": "dropped",
+                        "event.reason": "message already exist",
+                        "message_id": event.message_id,
+                        "replace": event.replace,
+                    }
                 else:
                     self._messages[event.message_id] = orm.ActivityMessage(
                         id=event.message_id,
@@ -404,18 +405,22 @@ class EventProcessor:
             case ag_ui.core.ActivityDeltaEvent():
                 message = self._messages.get(event.message_id)
                 if message is None:
-                    state = "dropped"
-                    reason = "message does not exist"
-                    extra_attrs = {"message_id": event.message_id}
+                    attrs = {
+                        "event.state": "dropped",
+                        "event.reason": "message does not exist",
+                        "message_id": event.message_id,
+                    }
                 elif not isinstance(message, orm.ActivityMessage):
-                    state = "dropped"
-                    reason = "mismatching message role"
-                    extra_attrs = {"message_role": message.role}
+                    attrs = {
+                        "event.state": "dropped",
+                        "event.reason": "mismatching message role",
+                        "message_role": message.role,
+                    }
                 else:
                     if event.activity_type != message.activity_type:
-                        state = "overridden"
-                        reason = "mismatching activity type"
-                        extra_attrs = {
+                        attrs = {
+                            "event.state": "overridden",
+                            "event.reason": "mismatching activity type",
                             "message_activity_type": message.activity_type,
                             "event_activity_type": event.activity_type,
                         }
@@ -423,8 +428,7 @@ class EventProcessor:
 
                     content = self._apply_jsonpatch(message.content, event.patch)
                     if content is None:
-                        state = "dropped"
-                        reason = "invalid JSON patches"
+                        attrs = {"event.state": "dropped", "event.reason": "invalid JSON patches"}
                     else:
                         message.updated_at = parse_timestamp(event.timestamp)
                         message.content = content
@@ -435,9 +439,11 @@ class EventProcessor:
                 pass
             case ag_ui.core.ReasoningMessageStartEvent():
                 if event.message_id in self._reasoning_data:
-                    state = "overridden"
-                    reason = "already started"
-                    extra_attrs = {"message_id": event.message_id}
+                    attrs = {
+                        "event.state": "overridden",
+                        "event.reason": "already started",
+                        "message_id": event.message_id,
+                    }
                 self._reasoning_data[event.message_id] = ReasoningData(
                     created_at=parse_timestamp(event.timestamp),
                     message_id=event.message_id,
@@ -445,25 +451,33 @@ class EventProcessor:
             case ag_ui.core.ReasoningMessageContentEvent():
                 rd = self._reasoning_data.get(event.message_id)
                 if rd is None:
-                    state = "dropped"
-                    reason = "not started"
-                    extra_attrs = {"message_id": event.message_id}
+                    attrs = {
+                        "event.state": "dropped",
+                        "event.reason": "not started",
+                        "message_id": event.message_id,
+                    }
                 elif rd.finished:
-                    state = "dropped"
-                    reason = "finished"
-                    extra_attrs = {"message_id": event.message_id}
+                    attrs = {
+                        "event.state": "dropped",
+                        "event.reason": "finished",
+                        "message_id": event.message_id,
+                    }
                 else:
                     rd.content_deltas.append(event.delta)
             case ag_ui.core.ReasoningMessageEndEvent():
                 rd = self._reasoning_data.get(event.message_id)
                 if rd is None:
-                    state = "dropped"
-                    reason = "not started"
-                    extra_attrs = {"message_id": event.message_id}
+                    attrs = {
+                        "event.state": "dropped",
+                        "event.reason": "not started",
+                        "message_id": event.message_id,
+                    }
                 elif rd.finished:
-                    state = "dropped"
-                    reason = "already finished"
-                    extra_attrs = {"message_id": event.message_id}
+                    attrs = {
+                        "event.state": "dropped",
+                        "event.reason": "already finished",
+                        "message_id": event.message_id,
+                    }
                 else:
                     rd.finished = True
             case (
@@ -496,19 +510,21 @@ class EventProcessor:
                 }
                 if isinstance(event, ag_ui.core.ThinkingTextMessageStartEvent):
                     event_data["role"] = "reasoning"
-                self._add_event_span(event, state="replaced", reason="deprecated")
+                self._add_event_span(event, **{"event.state": "replaced", "event.reason": "deprecated"})
                 event = pydantic.TypeAdapter(ag_ui.core.Event).validate_python(event_data)
                 return self._process_event(event)
             case _:
-                state = "passed through"
-                reason = "unknown event type"
-                extra_attrs = {"agent_event": event.model_dump()}
+                attrs = {
+                    "event.state": "passed through",
+                    "event.reason": "unknown event type",
+                    "agent_event": event.model_dump(),
+                }
 
-        if state == "dropped":
-            self._add_event_span(event, state=state, reason=reason, **extra_attrs)
+        if attrs.get("event.state") == "dropped":
+            self._add_event_span(event, **attrs)
             return None
 
-        self._add_event_span(event, state=state, reason=reason, **extra_attrs)
+        self._add_event_span(event, **attrs)
         return event
 
     @staticmethod
