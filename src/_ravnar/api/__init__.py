@@ -32,10 +32,9 @@ def make_router(
     ) -> schema.User:
         return user
 
-    # FIXME: cache
     @router.get("/config")
     async def get_config() -> schema.APIConfig:
-        return schema.APIConfig(agents=agent_handler.configs)
+        return schema.APIConfig(dynamic_agents_enabled=agent_handler.dynamic_enabled)
 
     router.include_router(
         make_files_router(file_handler=file_handler, authenticated_user=authenticated_user),

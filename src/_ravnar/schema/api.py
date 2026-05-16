@@ -2,7 +2,7 @@ from __future__ import annotations
 
 __all__ = [
     "APIConfig",
-    "AgentConfig",
+    "AgentInfo",
     "AugmentedActivityMessage",
     "AugmentedAssistantMessage",
     "AugmentedDeveloperMessage",
@@ -28,7 +28,8 @@ import ag_ui.core
 from pydantic import BeforeValidator, Field, model_validator
 
 from _ravnar import orm
-from _ravnar.utils import now
+from _ravnar.agents import Agent
+from _ravnar.utils import ImportStringWithParams, now
 
 from .misc import BaseModel
 
@@ -39,14 +40,14 @@ class QuickPrompt(BaseModel):
     prompt: str
 
 
-class AgentConfig(BaseModel):
+class AgentInfo(BaseModel):
     id: str
     capabilities: ag_ui.core.AgentCapabilities
     quick_prompts: list[QuickPrompt]
 
 
 class APIConfig(BaseModel):
-    agents: list[AgentConfig]
+    dynamic_agents_enabled: bool
 
 
 class Thread(BaseModel):
@@ -181,3 +182,8 @@ class RenameThreadData(BaseModel):
 
 class DeleteThreadsData(BaseModel):
     ids: list[str]
+
+
+class RegisterAgentData(BaseModel):
+    id: str
+    agent: ImportStringWithParams[Agent]
