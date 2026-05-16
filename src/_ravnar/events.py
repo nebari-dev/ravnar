@@ -168,7 +168,8 @@ class EventProcessor:
         span = tracer.start_span("EventProcessor.run")
         span.set_attribute("thread_id", self._thread_id)
         span.set_attribute("run_id", self._run_id)
-        span.set_attribute("parent_run_id", self._parent_run_id)
+        if self._parent_run_id is not None:
+            span.set_attribute("parent_run_id", self._parent_run_id)
 
         events = aiter(event_stream)
         try:
