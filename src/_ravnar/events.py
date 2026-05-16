@@ -440,10 +440,6 @@ class EventProcessor:
 
                 message.updated_at = parse_timestamp(event.timestamp)
                 message.content = content
-                if overridden:
-                    return self._trace_event(
-                        event,
-                    )
                 return self._trace_event(
                     event,
                     **{
@@ -466,13 +462,6 @@ class EventProcessor:
                     created_at=parse_timestamp(event.timestamp),
                     message_id=event.message_id,
                 )
-                if overridden:
-                    return self._trace_event(
-                        event,
-                        state="overridden",
-                        reason="already started",
-                        message_id=event.message_id,
-                    )
                 return self._trace_event(
                     event,
                     **{
@@ -552,7 +541,8 @@ class EventProcessor:
     def _override_event(event: TEvent, **replace: Any) -> TEvent:
         return cast(TEvent, event.model_copy(update={"raw_event": event, **replace}))
 
-    def _apply_jsonpatch(self, document: dict[str, Any], patches: list[Any]) -> Any:
+    @staticmethod
+    def _apply_jsonpatch(document: dict[str, Any], patches: list[Any]) -> Any:
         try:
             # this cannot be in-place as it will not roll back in case of an exception
             return jsonpatch.JsonPatch(patches).apply(document, in_place=False)
