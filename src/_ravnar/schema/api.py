@@ -47,6 +47,7 @@ class AgentConfig(BaseModel):
 
 class APIConfig(BaseModel):
     agents: list[AgentConfig]
+    storage_enabled: bool
 
 
 class Thread(BaseModel):

@@ -177,6 +177,7 @@ def _local_storage() -> Path:
 
 
 class StorageConfig(BaseModel, RenderableMixin):
+    enabled: bool = True
     database_dsn: str = Field(default_factory=lambda: f"sqlite:///{_local_storage() / 'state.db'}")
     file_storage_path: UPath = Field(default_factory=lambda: UPath(_local_storage() / "files"))
 
