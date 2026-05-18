@@ -11,7 +11,6 @@ from datetime import UTC, datetime
 from typing import Any, Generic, TypeVar, cast, get_type_hints
 
 import jinja2
-import structlog
 from pydantic import (
     BaseModel,
     Field,
@@ -28,8 +27,6 @@ from typing_extensions import ParamSpec
 
 T = TypeVar("T")
 P = ParamSpec("P")
-
-logger = structlog.get_logger()
 
 
 def as_awaitable(fn: Callable[P, T] | Callable[P, Awaitable[T]], *args: P.args, **kwargs: P.kwargs) -> Awaitable[T]:

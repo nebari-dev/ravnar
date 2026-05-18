@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import contextlib
+import functools
+import inspect
 import json
 import types
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar, cast, overload
 
 import anyio
 import fastapi
@@ -13,6 +16,7 @@ import sqlalchemy
 import starlette
 import structlog
 import uvicorn
+from fastapi import HTTPException
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import Resource
@@ -32,6 +36,11 @@ if TYPE_CHECKING:
 
     from .config import BaseConfig
 
+P = ParamSpec("P")
+T = TypeVar("T")
+
+tracer = trace.get_tracer("ravnar.instrumentation")
+
 
 def _drop_health_probe_access_logs(logger: WrappedLogger, method_name: str, event_dict: EventDict) -> EventDict:
     if event_dict.get("logger") == "uvicorn.access" and event_dict["endpoint"] == "/health":
@@ -50,6 +59,24 @@ def _drop_loggers(*loggers: str) -> Processor:
     return drop_logs
 
 
+def add_open_telemetry_spans(logger: WrappedLogger, method_name: str, event_dict: EventDict) -> EventDict:
+    span = trace.get_current_span()
+    if not span.is_recording():
+        event_dict["span"] = None
+        return event_dict
+
+    ctx = span.get_span_context()
+    parent = getattr(span, "parent", None)
+
+    event_dict["span"] = {
+        "span_id": format(ctx.span_id, "016x"),
+        "trace_id": format(ctx.trace_id, "032x"),
+        "parent_span_id": None if not parent else format(parent.span_id, "016x"),
+    }
+
+    return event_dict
+
+
 class LazyValue:
     def __init__(self, factory: Callable[[], Any]) -> None:
         self._factory = factory
@@ -60,6 +87,63 @@ class LazyValue:
     @staticmethod
     def evaluate(logger: WrappedLogger, method_name: str, event_dict: EventDict) -> EventDict:
         return {k: v() if isinstance(v, LazyValue) else v for k, v in event_dict.items()}
+
+
+def _traced(fn: Callable[P, T], *, name: str | None) -> Callable[P, T]:
+    if name is None:
+        name = f"{fn.__qualname__}"
+
+    @contextlib.contextmanager
+    def traced() -> Iterator[None]:
+        with tracer.start_as_current_span(name):
+            try:
+                yield
+            except HTTPException as exc:
+                span = trace.get_current_span()
+                span.add_event(
+                    "http_exception",
+                    attributes={"http.status_code": exc.status_code, "error.detail": exc.detail},
+                )
+                raise
+
+    if inspect.iscoroutinefunction(fn):
+
+        @functools.wraps(fn)
+        async def async_fn_wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+            with traced():
+                return await fn(*args, **kwargs)  # type: ignore[no-any-return]
+
+        return async_fn_wrapper  # type: ignore[return-value]
+
+    @functools.wraps(fn)
+    def sync_fn_wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+        with traced():
+            return fn(*args, **kwargs)
+
+    return sync_fn_wrapper
+
+
+@overload
+def traced(fn: Callable[P, T], /) -> Callable[P, T]: ...
+
+
+@overload
+def traced(fn: Callable[P, T], /, *, name: str | None = None) -> Callable[P, T]: ...
+
+
+@overload
+def traced(*, name: str | None = None) -> Callable[[Callable[P, T]], Callable[P, T]]: ...
+
+
+def traced(
+    fn: Callable[P, T] | None = None, /, *, name: str | None = None
+) -> Callable[P, T] | Callable[[Callable[P, T]], Callable[P, T]]:
+    def decorator(fn: Callable[P, T]) -> Callable[P, T]:
+        return _traced(fn, name=name)
+
+    if fn is None:
+        return decorator
+    return decorator(fn)
 
 
 def configure_logging(config: BaseConfig) -> None:
@@ -98,6 +182,7 @@ def configure_logging(config: BaseConfig) -> None:
                 ]
             ),
             structlog.contextvars.merge_contextvars,
+            add_open_telemetry_spans,
             structlog.processors.add_log_level,
             structlog.processors.TimeStamper(fmt="iso", utc=True),
             structlog.dev.set_exc_info,
