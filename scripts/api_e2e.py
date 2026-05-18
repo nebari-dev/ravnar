@@ -44,9 +44,6 @@ def main():
 
     agent_ids = [a["id"] for a in config["agents"]]
 
-    header("delete existing threads")
-    assert_successful_response(client.request("DELETE", "/api/threads", json={}))
-
     header("new thread")
     thread = assert_successful_response(
         client.post(
