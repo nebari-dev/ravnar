@@ -16,7 +16,7 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from _ravnar import schema
 from _ravnar.events import EventProcessor
 from _ravnar.file_storage import FileHandler
-from _ravnar.observability import configure_logging, configure_tracing
+from _ravnar.observability import configure_logging, configure_tracing, traced
 from _ravnar.utils import resolve_forward_references
 
 from .api import make_router as make_api_router
@@ -68,9 +68,7 @@ class Ravnar:
         else:
             authenticator = config.security.authenticator()
 
-            authenticated_user = tracer.start_as_current_span("authenticate")(
-                resolve_forward_references(authenticator.authenticate)
-            )
+            authenticated_user = traced(resolve_forward_references(authenticator.authenticate), name="authenticate")
 
         @app.get("/", include_in_schema=False)
         async def base_redirect() -> RedirectResponse:
@@ -149,11 +147,25 @@ class AgentHandler:
 
         event_processor = EventProcessor(run_agent_input=run_agent_input)
 
-        async def event_stream() -> AsyncIterator[ag_ui.core.Event]:
-            async for event in event_processor.process_event_stream(agent.run(run_agent_input)):
-                yield event
+        span = tracer.start_span("AgentHandler.run")
+        span.set_attribute("agent_id", agent_id)
+        span.set_attribute("thread_id", run_agent_input.thread_id)
+        span.set_attribute("run_id", run_agent_input.run_id)
+        if run_agent_input.parent_run_id is not None:
+            span.set_attribute("parent_run_id", run_agent_input.parent_run_id)
 
-            if callback is not None:
-                await callback(event_processor)
+        async def event_stream() -> AsyncIterator[ag_ui.core.Event]:
+            try:
+                async for event in event_processor.process_event_stream(agent.run(run_agent_input)):
+                    yield event
+
+                if callback is not None:
+                    await callback(event_processor)
+            except Exception as exc:
+                span.record_exception(exc)
+                span.set_status(trace.StatusCode.ERROR, description=str(exc))
+                raise
+            finally:
+                span.end()
 
         return fastsse.Response(event_stream(), encoder=self._sse_encoder)

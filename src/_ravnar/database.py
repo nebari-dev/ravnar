@@ -20,6 +20,7 @@ from typing_extensions import TypedDict
 
 from . import orm, schema
 from .mixin import SetupTeardownMixin
+from .observability import traced
 from .utils import as_async_context_manager, as_awaitable, now
 
 
@@ -133,6 +134,7 @@ class Database(SetupTeardownMixin):
             items=items,
         )
 
+    @traced
     async def add_file(self, file: orm.File) -> None:
         async with self._get_session() as session:
             session.add(file)
@@ -144,15 +146,18 @@ class Database(SetupTeardownMixin):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
         return file
 
+    @traced
     async def get_file(self, *, id: uuid.UUID, user_id: str) -> orm.File:
         async with self._get_session() as session:
             return await self._get_file(session, id=id, user_id=user_id)
 
+    @traced
     async def delete_file(self, *, id: uuid.UUID, user_id: str) -> None:
         async with self._get_session() as session:
             file = await self._get_file(session, id=id, user_id=user_id)
             await session.delete(file)
 
+    @traced
     async def create_thread(self, *, user_id: str, id: str, name: str | None, agent_id: str) -> orm.Thread:
         async with self._get_session() as session:
             query = select(orm.Thread).where(orm.Thread.id == id)
@@ -189,6 +194,7 @@ class Database(SetupTeardownMixin):
             session, orm_type=orm.Thread, select_qualifier=select_qualifier, pagination=pagination
         )
 
+    @traced
     async def get_threads(self, *, user_id: str, pagination: schema.Pagination) -> orm.Page[orm.Thread]:
         async with self._get_session() as session:
             return await self._get_threads(session, user_id=user_id, pagination=pagination)
@@ -201,16 +207,19 @@ class Database(SetupTeardownMixin):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Thread not found")
         return thread
 
+    @traced
     async def get_thread(self, *, user_id: str, id: str) -> orm.Thread:
         async with self._get_session() as session:
             return await self._get_thread(session, user_id=user_id, id=id)
 
+    @traced
     async def rename_thread(self, *, user_id: str, id: str, name: str) -> orm.Thread:
         async with self._get_session() as session:
             thread = await self._get_thread(session, user_id=user_id, id=id)
             thread.name = name
             return thread
 
+    @traced
     async def create_run(self, run: orm.Run) -> None:
         async with self._get_session() as session:
             session.add(run)
@@ -227,10 +236,12 @@ class Database(SetupTeardownMixin):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
         return run
 
+    @traced
     async def get_run(self, *, id: str, user_id: str) -> orm.Run:
         async with self._get_session() as session:
             return await self._get_run(session, id=id, user_id=user_id)
 
+    @traced
     async def get_runs(
         self,
         *,
@@ -289,6 +300,7 @@ class Database(SetupTeardownMixin):
         result = await session.execute(query)
         return list(result.unique().scalars().all())
 
+    @traced
     async def get_thread_history(
         self, *, user_id: str, thread_id: str, run_id: str | None
     ) -> tuple[orm.Thread, orm.Run | None, list[orm.Message]]:
@@ -308,6 +320,7 @@ class Database(SetupTeardownMixin):
             messages = await self._get_thread_messages(session, run_id=run.id)
             return thread, run, messages
 
+    @traced
     async def delete_threads(self, *, user_id: str, ids: list[str]) -> None:
         async with self._get_session() as session:
             single_page = await self._get_threads(session, user_id=user_id, ids=ids)
