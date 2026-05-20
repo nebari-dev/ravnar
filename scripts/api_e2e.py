@@ -57,6 +57,8 @@ def main():
 
     header("new run in same thread with frontend tool call")
 
+    root_run_id = str(uuid.uuid4())
+
     class CheerInput(pydantic.BaseModel):
         name: str = pydantic.Field(description="Name of the user")
 
@@ -66,8 +68,9 @@ def main():
     with httpx_sse.connect_sse(
         client,
         "POST",
-        f"/api/threads/{thread['id']}/run",
+        f"/api/threads/{thread['id']}/runs",
         json={
+            "id": root_run_id,
             "messages": [
                 {
                     "id": str(uuid.uuid4()),
@@ -103,14 +106,11 @@ def main():
     )
     print(tool_call.model_dump_json(indent=2))
 
-    thread = assert_successful_response(client.get(f"/api/threads/{thread['id']}")).json()
-    print(json.dumps(thread, indent=2))
-
     header("new run in same thread with frontend tool call result")
     with httpx_sse.connect_sse(
         client,
         "POST",
-        f"/api/threads/{thread['id']}/run",
+        f"/api/threads/{thread['id']}/runs",
         json={
             "messages": [
                 {
@@ -130,9 +130,38 @@ def main():
     thread = assert_successful_response(client.get(f"/api/threads/{thread['id']}")).json()
     print(json.dumps(thread, indent=2))
 
+    header("new run in same thread branching from root run with different frontend tool call result")
+    with httpx_sse.connect_sse(
+        client,
+        "POST",
+        f"/api/threads/{thread['id']}/runs",
+        json={
+            "parentRunId": root_run_id,
+            "messages": [
+                {
+                    "id": str(uuid.uuid4()),
+                    "content": json.dumps({"successful": False}),
+                    "role": "tool",
+                    "toolCallId": tool_call_id,
+                },
+            ],
+        },
+    ) as event_source:
+        assert_successful_response(event_source.response)
+        for sse in event_source.iter_sse():
+            event = sse.json()
+            print(json.dumps(event, indent=2))
+
+    thread = assert_successful_response(client.get(f"/api/threads/{thread['id']}")).json()
+    print(json.dumps(thread, indent=2))
+
     header("list threads")
     thread = assert_successful_response(client.get("/api/threads", params={"sortBy": "createdAt"})).json()
     print(json.dumps(thread, indent=2))
+
+    header("list messages")
+    messages = assert_successful_response(client.get("/api/threads/messages")).json()
+    print(json.dumps(messages, indent=2))
 
 
 if __name__ == "__main__":
