@@ -50,11 +50,19 @@ class APIConfig(BaseModel):
     agents: list[AgentConfig]
 
 
+class Run(BaseModel):
+    id: str
+    thread_id: str
+    parent_run_id: str | None = None
+    created_at: datetime
+
+
 class Thread(BaseModel):
     id: str
     name: str | None = None
     agent_id: str
     created_at: datetime
+    runs: list[Run]
 
 
 class AugmentedMessageMixin(BaseModel):
@@ -165,13 +173,6 @@ class CreateThreadData(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str | None = None
     agent_id: str
-
-
-class Run(BaseModel):
-    id: str
-    thread_id: str
-    parent_run_id: str | None = None
-    created_at: datetime
 
 
 class CreateRunData(BaseModel):
