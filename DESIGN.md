@@ -2,13 +2,14 @@
 
 ## Summary
 
-Add task-level authorization to ravnar's API by introducing a flat list of permissions on the `schema.User` model. Permissions are ephemeral, provided exclusively by the Authenticator on each request, and never stored by ravnar. A new factory dependency `authorized_user_with(*permissions)` gates each endpoint, checking that the authenticated user possesses all required permissions. Existing item-level authorization (user-scoped data isolation) is untouched.
+Add task-level authorization to ravnar's API by introducing a flat list of permissions on the `schema.User` model. Permissions are ephemeral, provided exclusively by the Authenticator on each request, and never stored by ravnar. A new factory dependency `authorized_user_with(*permissions)` gates each endpoint, checking that the authenticated user possesses all required permissions. A `require_permissions` decorator provides the same check for non-endpoint functions. Existing item-level authorization (user-scoped data isolation) is untouched.
 
 ## Goals
 
 - Gate every API endpoint behind task-level authorization using a permission system.
 - Keep permissions ephemeral — sourced from the Authenticator, never persisted by ravnar.
 - Make authz transparent to endpoint logic via a `Depends()` factory.
+- Provide a `require_permissions` decorator for internal functions that need permission checks without being FastAPI endpoints.
 - Preserve existing item-level authorization (user sees only their own threads, files, etc.).
 - Require no database changes, no admin interface, and no user management features.
 
@@ -27,23 +28,21 @@ Currently ravnar only authenticates users and enforces item-level authorization 
 
 ### Permission Model
 
-A permission is an opaque string with a validated format: `<resource>:<action>`.
+A permission is a validated string with format `<resource>:<action>`.
 
-- **Resources**: `files`, `threads`, `agents`.
-- **Actions**: `read`, `write`, `delete`.
-
-A `Permission` type enforces this format via a Pydantic `AfterValidator`. Invalid formats raise `ValueError`.
-
-Permissions are stored as a field on `schema.User`:
+The permission registry is a module-level dictionary in `auth.py`:
 
 ```python
-permissions: Annotated[list[Permission], Field(default_factory=list)] = Field(
-    default_factory=list,
-    # validator deduplicates and sorts alphabetically
-)
+PERMISSION_REGISTRY: dict[str, list[str]] = {
+    "files": ["read", "write", "delete"],
+    "threads": ["read", "write", "delete"],
+    "agents": ["read", "write", "delete"],
+}
 ```
 
-A validator on the container deduplicates entries and sorts them alphabetically, ensuring canonical representation.
+The `Permission` type validates that both the resource and action exist in this registry. Unknown resources or actions raise `ValueError`. Adding a new permission requires updating the registry.
+
+`ALL_PERMISSIONS` is a module-level `frozenset` derived from the registry, representing the complete set of all valid permissions.
 
 ### Permission Taxonomy
 
@@ -65,19 +64,42 @@ Endpoints that require authentication but no specific permission use `authorized
 
 ### New Module: `auth.py`
 
-A new internal module at `src/_ravnar/auth.py` provides the authorization factory:
+A new internal module at `src/_ravnar/auth.py` houses the `User` model, `Permission` type, permission registry, `ALL_PERMISSIONS` constant, and the authorization factory.
+
+#### Models and Types (moved from `schema/misc.py`)
+
+- **`User`** — moved from `schema/misc.py` to `auth.py`. `schema/__init__.py` imports it from `auth.py` instead. This avoids circular imports because `auth.py` only needs `BaseModel` from `schema/misc.py`, which has no dependency on `User`.
+- **`Permission`** — `Annotated[str, AfterValidator(...)]` that validates against the permission registry.
+
+#### Constants
+
+- **`PERMISSION_REGISTRY`** — `{resource: [actions]}` dictionary defining all valid permissions.
+- **`ALL_PERMISSIONS`** — `frozenset` of all valid permissions derived from the registry. Used as the default permission set for unauthenticated environments and the debug authenticator.
+
+#### Core Permission-Check Logic
+
+A shared internal function performs the actual permission check:
+
+```python
+def _check_permissions(user: schema.User, required: frozenset[str]) -> None:
+    """Raise HTTPException(403) if user lacks any required permission."""
+```
+
+This is used by both the factory and the decorator to avoid duplication.
+
+#### `make_authorized_user_factory`
 
 ```python
 def make_authorized_user_factory(
     security_config: SecurityConfig,
-) -> tuple[Callable[..., Awaitable[schema.User]], Callable[..., Any]]:
-    """Returns (authenticated_user, authorized_user_with)."""
+) -> tuple[Callable[..., Awaitable[schema.User]], Callable[..., Any], Callable[..., Callable]]:
+    """Returns (authenticated_user, authorized_user_with, require_permissions)."""
 ```
 
 The function:
 
-1. **Creates `authenticated_user`** from `security_config.authenticator`, mirroring the current logic in `core.py`:
-   - If no authenticator is configured, returns a default user (current system user).
+1. **Creates `authenticated_user`** from `security_config.authenticator`:
+   - If no authenticator is configured, returns a default user with **`ALL_PERMISSIONS`** (full admin).
    - If configured, instantiates the authenticator and resolves forward references on its `authenticate` method.
 
 2. **Returns `authorized_user_with`** — a factory that takes `*permissions: str` and returns a FastAPI dependency:
@@ -85,9 +107,15 @@ The function:
    - If no permissions are passed (`authorized_user_with()`), it only authenticates the user without any permission gate.
    - Missing permissions raise `HTTPException(status_code=403, detail="Insufficient permissions")`.
 
+3. **Returns `require_permissions`** — a decorator that wraps a function (sync or async) and checks permissions before executing:
+   - The wrapper inspects the wrapped function's kwargs for a `user: schema.User` parameter.
+   - Delegates to `_check_permissions` (same core logic as the factory).
+   - Raises `HTTPException(status_code=403, detail="Insufficient permissions")` on failure.
+   - Used on internal functions like `hydrate_files` that need permission checks without being FastAPI endpoints.
+
 The `authenticated_user` reference is captured in the closure of `authorized_user_with`, so FastAPI deduplicates the auth call across multiple `Depends()` invocations in the same request.
 
-This module is only imported from `core.py`. The `authorized_user_with` factory is then passed to all router factories in place of `authenticated_user`.
+This module is only imported from `core.py`. The `authorized_user_with` factory and `require_permissions` decorator are then passed to router factories.
 
 ### Endpoint Dependency Pattern
 
@@ -108,15 +136,19 @@ Endpoints that need authentication but no permission check use:
 user: schema.User = Depends(authorized_user_with())
 ```
 
+#### `require_permissions` Decorator
+
+For internal functions that are not FastAPI endpoints (e.g., `hydrate_files` in `threads.py`), the `@require_permissions("files:read", "files:write")` decorator provides the same permission check. The wrapped function must accept a `user: schema.User` kwarg.
+
 ### Router-Level Dependencies
 
-The top-level API router (`src/_ravnar/api/__init__.py`) retains a router-level dependency for defense in depth:
+The top-level API router (`src/_ravnar/api/__init__.py`) retains a router-level auth-only dependency:
 
 ```python
-router = schema.APIRouter(tags=["API"], dependencies=[Depends(authenticated_user)])
+router = schema.APIRouter(tags=["API"], dependencies=[Depends(authorized_user_with())])
 ```
 
-This ensures every request to `/api/*` passes through authentication, even if an endpoint accidentally omits its `Depends()` declaration. The top-level dependency uses `authenticated_user` (not `authorized_user_with`) because it has no permission context.
+This ensures every request to `/api/*` passes through authentication, even if an endpoint accidentally omits its `Depends()` declaration.
 
 Router-level dependencies are **removed** from all sub-routers (`threads.py`, `files.py`, `agents.py`). Per-endpoint `Depends(authorized_user_with(...))` declarations are the sole source of permission checks, making the required permissions visible in each endpoint's signature.
 
@@ -125,16 +157,14 @@ Router-level dependencies are **removed** from all sub-routers (`threads.py`, `f
 `core.py` becomes the single caller of `make_authorized_user_factory`:
 
 ```python
-authenticated_user, authorized_user_with = make_authorized_user_factory(config.security)
+authenticated_user, authorized_user_with, require_permissions = make_authorized_user_factory(config.security)
 ```
 
-The `authorized_user_with` factory is passed to `make_api_router()` and through to sub-routers.
+The `authorized_user_with` factory and `require_permissions` decorator are passed to `make_api_router()` and through to sub-routers.
 
 ### Schema Changes
 
-#### `schema.User`
-
-Add a `permissions` field:
+#### `schema.User` (moved to `auth.py`)
 
 ```python
 class User(BaseModel):
@@ -143,34 +173,39 @@ class User(BaseModel):
     permissions: list[Permission] = Field(default_factory=list)
 ```
 
+A validator on the `permissions` field deduplicates entries and sorts them alphabetically.
+
 #### `Permission` Type
 
 ```python
 Permission = Annotated[
     str,
-    AfterValidator(_validate_permission_format),
+    AfterValidator(_validate_permission),
 ]
 ```
 
-The validator enforces `<resource>:<action>` format where both parts are non-empty, lowercase, alphanumeric (with underscores/hyphens allowed).
+The validator checks:
+1. Format: exactly one colon separator, non-empty resource and action parts.
+2. Resource exists in `PERMISSION_REGISTRY`.
+3. Action exists in `PERMISSION_REGISTRY[resource]`.
+
+Any violation raises `ValueError`.
 
 ### Authenticator Changes
 
 #### `DebugAuthenticator`
 
-Returns a user with **all permissions** (acts as an admin):
+Returns a user with **`ALL_PERMISSIONS`** (acts as an admin):
 
 ```python
 return schema.User(
     id="debug",
-    permissions=["agents:delete", "agents:read", "agents:write",
-                 "files:delete", "files:read", "files:write",
-                 "threads:delete", "threads:read", "threads:write"],
+    permissions=list(ALL_PERMISSIONS),
     data={...},
 )
 ```
 
-Permissions are hardcoded as the full taxonomy, keeping them in the schema module as a canonical reference.
+Uses the centralized `ALL_PERMISSIONS` constant so the permission list is never manually duplicated.
 
 #### `ForwardedUserAuthenticator`
 
@@ -209,11 +244,15 @@ class OIDCTokenValidator:
 - If `permissions_claim` **is set** and present in the JWT: extract the claim value (must be a list of strings) as the user's permissions.
 - If `permissions_claim` **is set** but missing from the JWT payload: raise `HTTPException(status_code=401, detail="Required permissions claim missing in token")`.
 
-`BearerTokenAuthenticator` passes the parameter through from its `TokenValidator`.
+`BearerTokenAuthenticator` requires **no changes** — it is a thin wrapper around whatever `TokenValidator` is passed to it. The `permissions_claim` parameter lives entirely in `OIDCTokenValidator.__init__` and is configured directly in the admin's config (e.g., YAML) when constructing the validator.
 
 ### Config Changes
 
 No changes to `SecurityConfig`. Authenticators are configured via `ImportStringWithParams`, so new parameters (`permissions_header`, `permissions_claim`) are provided through config YAML or environment variables.
+
+### File Hydration Permission Check
+
+The `hydrate_files` function in `threads.py` requires `files:read` and `files:write` but only when file content is actually present in the run messages. Rather than gating the entire `POST /api/threads/{id}/run` endpoint with these permissions (which would block users who never use files), the `@require_permissions("files:read", "files:write")` decorator is applied directly to `hydrate_files`.
 
 ### `GET /api/user` Response
 
@@ -225,19 +264,22 @@ The endpoint returns `schema.User` as-is, which now includes the `permissions` l
 |---|---|---|
 | Per-endpoint declarations are mandatory | Removing router-level dependencies from sub-routers means an endpoint without `Depends(authorized_user_with(...))` is unprotected (except by the top-level auth guard). | Top-level auth still blocks unauthenticated access. Code review and tests catch missing declarations. |
 | Flat permissions, no roles | The Authenticator must map roles to permissions externally. Ravnar has no concept of "admin" or "editor" roles. | Acceptable — role semantics belong to the identity provider, not ravnar. |
-| Permission typos silently fail | If the authenticator returns `"file:write"` instead of `"files:write"`, access is denied with no obvious error. | The `Permission` type validates format, and dedup/sort normalization catches duplicates. |
+| Strict permission validation | Adding a new resource or action requires updating the permission registry. | Centralized registry makes this a one-line change. The tradeoff is acceptable because ravnar defines the permission taxonomy, not the admin. |
 | `/api/config` remains authenticated | The top-level router dependency means even config requires authentication. | This is intentional — the current code already does this. |
 
 ## Testing Strategy
 
 ### Unit Tests
 
-- **`Permission` validator**: Valid formats accepted, invalid formats rejected, container dedup/sort verified.
-- **`authorized_user_with` factory**: 
+- **`Permission` validator**: Valid formats accepted, invalid formats rejected, container dedup/sort verified, unknown resource/action rejected.
+- **`authorized_user_with` factory**:
   - User with all required permissions → returns user.
   - User missing one permission → 403.
   - User with no permissions calling `authorized_user_with()` (no args) → returns user.
   - Empty permission check with non-empty user permissions → returns user.
+- **`require_permissions` decorator**:
+  - Decorated function with correct permissions → executes normally.
+  - Decorated function with missing permissions → 403, function body not executed.
 - **Authenticator changes**:
   - `DebugAuthenticator` returns full permission set.
   - `ForwardedUserAuthenticator` parses permissions from header, handles missing header.
@@ -247,8 +289,7 @@ The endpoint returns `schema.User` as-is, which now includes the `permissions` l
 
 - **Permission-gated endpoints**: Test each endpoint with a user that has the correct permission (200) and without it (403).
 - **Auth-only endpoints**: `GET /api/user` and `GET /api/config` work with any authenticated user, even with no permissions.
-- **Top-level defense**: Verify that removing `Depends()` from an endpoint still blocks unauthenticated requests.
-- **File hydration in runs**: Verify that `POST /api/threads/{id}/run` requires `files:write` (for file hydration).
+- **File hydration in runs**: Verify that `POST /api/threads/{id}/run` with file content requires `files:read` and `files:write` via the `@require_permissions` decorator.
 
 ### Test Fixtures
 
