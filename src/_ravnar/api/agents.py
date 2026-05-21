@@ -38,7 +38,12 @@ def _make_dynamic_agents_router(
     agent_handler: AgentHandler,
     authenticated_user: Callable[..., Any],
 ) -> None:
-    @router.post("")
+    description = (
+        "Only available if dynamic agents are enabled. "
+        "Can be checked with [`GET /api/config`](#/API/get_config_api_config_get)."
+    )
+
+    @router.post("", description=description)
     async def register_agent(
         data: schema.RegisterAgentData,
     ) -> schema.AgentInfo:
@@ -50,7 +55,7 @@ def _make_dynamic_agents_router(
             quick_prompts=agent.get_quick_prompts(),
         )
 
-    @router.delete("/{agentId}")
+    @router.delete("/{agentId}", description=description)
     async def unregister_agent(
         agent_id: Annotated[str, Path(alias="agentId")],
     ) -> None:
