@@ -58,6 +58,10 @@ The `Permission` type validates that both the resource and action exist in this 
 | `agents:write` | `POST /api/agents` (register agent, dynamic only) |
 | `agents:delete` | `DELETE /api/agents/{id}` (unregister agent, dynamic only) |
 
+> **Note:** Running an agent (`POST /api/agents/{id}/run`) is gated by `agents:read`, not a separate `agents:run` or `agents:execute` permission. Agent execution is a non-goal for permission granularity at this stage — `agents:read` is sufficient. If future requirements call for separating "viewing" from "executing" agents, a new permission would be added to the registry.
+
+> **Note:** Both bulk delete (`DELETE /api/threads`) and single delete (`DELETE /api/threads/{id}`) share the same `threads:delete` permission. This is acceptable because all operations are scoped to the authenticated user's own data.
+
 Endpoints that require authentication but no specific permission use `authorized_user_with()` with no arguments:
 - `GET /api/user`
 - `GET /api/config`
@@ -68,7 +72,7 @@ A new internal module at `src/_ravnar/auth.py` houses the `User` model, `Permiss
 
 #### Models and Types (moved from `schema/misc.py`)
 
-- **`User`** — moved from `schema/misc.py` to `auth.py`. `schema/__init__.py` imports it from `auth.py` instead. This avoids circular imports because `auth.py` only needs `BaseModel` from `schema/misc.py`, which has no dependency on `User`.
+- **`User`** — moved from `schema/misc.py` to `auth.py`. The schema is not public, so `User` is **not** re-exported from `schema/__init__.py`. All modules that need `User` import it directly from `_ravnar.auth`.
 - **`Permission`** — `Annotated[str, AfterValidator(...)]` that validates against the permission registry using a regex with named groups, followed by registry lookup.
 
 #### Constants
@@ -82,7 +86,10 @@ A plain function that checks a user's permissions and raises `HTTPException(403)
 
 ```python
 def assert_permissions(user: schema.User, *permissions: str) -> None:
-    """Raise HTTPException(403) if user lacks any required permission."""
+    """Raise HTTPException(403) if user lacks any required permission.
+    
+    The error detail includes the list of missing permissions.
+    """
 ```
 
 It is a module-level function, not returned by the factory. Any module that needs permission checks on internal functions can import it directly from `_ravnar.auth`. The caller passes the `user` object explicitly — no signature inspection, no decorators.
@@ -96,6 +103,8 @@ def make_authorized_user_factory(
     """Returns authorized_user_with."""
 ```
 
+Multiple-permission checks always use **AND logic**. `authorized_user_with("a", "b")` requires the user to possess both `a` and `b`. If OR logic is ever needed, `assert_permissions` can be called conditionally inside an endpoint body.
+
 The function:
 
 1. **Creates `authenticated_user` internally** from `security_config.authenticator`:
@@ -106,11 +115,11 @@ The function:
 2. **Returns `authorized_user_with`** — a factory that takes `*permissions: str` and returns a FastAPI dependency:
    - The returned dependency accepts `user: schema.User = Depends(authenticated_user)` and checks that all required permissions are present in `user.permissions` (delegating to `assert_permissions`).
    - If no permissions are passed (`authorized_user_with()`), it only authenticates the user without any permission gate.
-   - Missing permissions raise `HTTPException(status_code=403, detail="Insufficient permissions")`.
+   - Missing permissions raise `HTTPException(status_code=403, detail=f"Insufficient permissions. Missing: {missing_permissions}")`.
 
 The `authenticated_user` reference is captured in the closure of `authorized_user_with`, so FastAPI deduplicates the auth call across multiple `Depends()` invocations in the same request.
 
-This module is only imported from `core.py`. The `authorized_user_with` factory is then passed to router factories.
+This module is only imported from `core.py`. The `authorized_user_with` factory is then passed to sub-routers the same way `authenticated_user` is currently passed through.
 
 ### Endpoint Dependency Pattern
 
@@ -261,6 +270,8 @@ No changes to `SecurityConfig`. Authenticators are configured via `ImportStringW
 ### File Hydration Permission Check
 
 The `hydrate_files` function in `threads.py` requires `files:read` and `files:write` but only when file content is actually present in the run messages. Rather than gating the entire `POST /api/threads/{id}/run` endpoint with these permissions (which would block users who never use files), `assert_permissions(user, "files:read", "files:write")` is called at the top of `hydrate_files`.
+
+This means a user with `threads:write` but no file permissions can start a run successfully but gets a 403 mid-execution if file content is present. This deferred-check approach is acceptable — the endpoint gate covers the core operation, and file-specific permissions are enforced only when file content is actually present.
 
 ### `GET /api/user` Response
 
