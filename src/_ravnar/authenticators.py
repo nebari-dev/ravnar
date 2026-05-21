@@ -9,7 +9,9 @@ import pydantic
 from fastapi import Depends, Request, status
 from fastapi.exceptions import HTTPException
 from fastapi.security import APIKeyHeader
+from opentelemetry import trace
 
+from _ravnar.observability import traced
 from _ravnar.utils import as_awaitable
 
 from . import schema
@@ -25,6 +27,7 @@ class Authenticator(abc.ABC):
 class DebugAuthenticator(Authenticator):
     """Debug Authenticator"""
 
+    @traced
     async def authenticate(self, request: Request) -> schema.User:
         body = await request.body()
         try:
@@ -49,6 +52,7 @@ class ForwardedUserAuthenticator(Authenticator):
     """Forwarded User Authenticator"""
 
     def __init__(self, *, id_header: str = "X-Forwarded-User"):
+        @traced(name="ForwardedUserAuthenticator.authenticate")
         async def authenticate(id: str = Depends(APIKeyHeader(name=id_header))) -> schema.User:
             return schema.User(id=id)
 
@@ -105,7 +109,16 @@ class OIDCTokenValidator:
 
         self._decode_kwargs = decode_kwargs
 
+    @traced(name="OIDCTokenValidator")
     def __call__(self, token: str) -> schema.User:
+        try:
+            return self._validate(token)
+        except HTTPException as exc:
+            span = trace.get_current_span()
+            span.add_event("validation_failure", attributes={"reason": exc.detail})
+            raise
+
+    def _validate(self, token: str) -> schema.User:
         import jwt
 
         try:
@@ -154,5 +167,6 @@ class BearerTokenAuthenticator(Authenticator):
     def __init__(self, token_validator: TokenValidator) -> None:
         self._token_validator = token_validator
 
+    @traced
     async def authenticate(self, token: str = Depends(get_bearer_token)) -> schema.User:
         return await as_awaitable(self._token_validator, token)

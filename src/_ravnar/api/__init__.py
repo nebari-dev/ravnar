@@ -33,8 +33,8 @@ def make_router(
     @router.get("/config")
     async def get_config() -> schema.APIConfig:
         return schema.APIConfig(
-            agents=agent_handler.configs,
             storage_enabled=storage_config.enabled,
+            dynamic_agents_enabled=agent_handler.dynamic_enabled,
         )
 
     if storage_config.enabled:

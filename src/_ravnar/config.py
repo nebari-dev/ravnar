@@ -1,28 +1,21 @@
 from __future__ import annotations
 
-import contextlib
-import json
 import os
 import sys
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Generic, Self, TypeVar
+from typing import Any, Self, TypeVar
 
-import jinja2
 import l2sl
 from pydantic import (
     BaseModel,
     Field,
-    ImportString,
-    SerializerFunctionWrapHandler,
-    ValidationError,
     field_validator,
-    model_serializer,
     model_validator,
 )
-from pydantic_core import PydanticCustomError
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict, YamlConfigSettingsSource
 from upath import UPath
+
+from _ravnar.utils import ImportStringWithParams, render_template
 
 from .agents import Agent, DefaultAgent
 from .authenticators import Authenticator
@@ -32,102 +25,6 @@ T = TypeVar("T")
 
 def interactive_session() -> bool:
     return sys.stdout.isatty()
-
-
-def render_template(s: Any) -> Any:
-    if isinstance(s, str):
-        return jinja2.Environment().from_string(s).render(**os.environ)
-    if isinstance(s, dict):
-        return {render_template(k): render_template(v) for k, v in s.items()}
-    if isinstance(s, list):
-        return [render_template(v) for v in s]
-    return s
-
-
-class ImportStringWithParams(BaseModel, Generic[T]):
-    cls_or_fn: ImportString[type[T] | Callable[..., T]]
-    params: dict[str, Any] = Field(default_factory=dict)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _from_str_or_type_or_callable(cls, m: Any) -> Any:
-        if isinstance(m, str):
-            with contextlib.suppress(json.JSONDecodeError):
-                m = json.loads(m)
-
-        if isinstance(m, (str, type)) or callable(m):
-            m = {"cls_or_fn": m}
-        return m
-
-    @model_validator(mode="before")
-    @classmethod
-    def _validate_nested(cls, data: Any) -> Any:
-        if not isinstance(data, dict) or "params" not in data or not isinstance(data["params"], dict):
-            return data
-
-        def validate(v: Any, loc: tuple[str | int, ...]) -> Any:
-            match v:
-                case dict():
-                    if "cls_or_fn" in v:
-                        try:
-                            return cls.model_validate(v)
-                        except ValidationError as ve:
-                            # rewrite the errors to include the proper location
-                            raise ValidationError.from_exception_data(
-                                ve.title,
-                                [
-                                    {
-                                        "type": PydanticCustomError(e["type"], e["msg"], e.get("ctx")),
-                                        "loc": (*loc, *e["loc"]),
-                                        "input": e["input"],
-                                    }
-                                    for e in ve.errors()
-                                ],
-                            ) from None
-
-                    return {k: validate(v, (*loc, k)) for k, v in v.items()}
-                case list():
-                    return [validate(v, (*loc, i)) for i, v in enumerate(v)]
-                case _:
-                    return v
-
-        data["params"] = {k: validate(v, ("params", k)) for k, v in data["params"].items()}
-
-        return data
-
-    @field_validator("cls_or_fn", "params", mode="before")
-    @classmethod
-    def _render_field_templates(cls, f: Any) -> Any:
-        if isinstance(f, str):
-            return render_template(f)
-
-        return f
-
-    @field_validator("params", mode="after")
-    @classmethod
-    def _render_param_items(cls, params: dict[str, Any]) -> dict[str, Any]:
-        return {render_template(k): render_template(v) for k, v in params.items()}
-
-    @model_serializer(mode="wrap")
-    def _serialize(self, nxt: SerializerFunctionWrapHandler) -> Any:
-        s = nxt(self)
-        if not self.params:
-            s = s["cls_or_fn"]
-        return s
-
-    def __call__(self) -> T:
-        def call(v: Any) -> Any:
-            match v:
-                case ImportStringWithParams():
-                    return v()
-                case dict():
-                    return {k: call(v) for k, v in v.items()}
-                case list():
-                    return [call(x) for x in v]
-                case _:
-                    return v
-
-        return self.cls_or_fn(**{k: call(v) for k, v in self.params.items()})
 
 
 class RenderableMixin:
@@ -182,16 +79,31 @@ class StorageConfig(BaseModel, RenderableMixin):
     file_storage_path: UPath = Field(default_factory=lambda: UPath(_local_storage() / "files"))
 
 
+class DynamicAgentConfig(BaseModel, RenderableMixin):
+    enabled: bool = False
+
+
+class AgentConfig(BaseModel, RenderableMixin):
+    static: dict[str, ImportStringWithParams[Agent]] = Field(
+        default_factory=lambda: {  # type: ignore[arg-type]
+            "default": ImportStringWithParams(cls_or_fn=DefaultAgent),
+        }
+    )
+    dynamic: DynamicAgentConfig = Field(default_factory=DynamicAgentConfig)
+
+    @model_validator(mode="after")
+    def _ensure_not_agentless(self) -> Self:
+        if not self.static and not self.dynamic.enabled:
+            raise ValueError("At least one static agent must be configured, or dynamic agents must be enabled.")
+        return self
+
+
 class BaseConfig(BaseSettings, RenderableMixin):
     server: ServerConfig = Field(default_factory=ServerConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
 
-    agents: dict[str, ImportStringWithParams[Agent]] = Field(
-        default_factory=lambda: {  # type: ignore[arg-type]
-            "default": ImportStringWithParams(cls_or_fn=DefaultAgent),
-        }
-    )
+    agents: AgentConfig = Field(default_factory=AgentConfig)
 
 
 class Config(BaseConfig):
