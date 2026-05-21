@@ -194,7 +194,7 @@ Permission = Annotated[
 
 The validator works in two steps:
 
-1. **Regex with named groups** — matches the pattern `(?P<resource>[^:]+):(?P<action>[^:]+)`. If the pattern doesn't match (no colon, empty groups, multiple colons), raises `ValueError`.
+1. **Regex with named groups** — matches the pattern `^(?P<resource>[^:]+):(?P<action>[^:]+)$`. Anchors ensure the entire string is matched, not just a substring. If the pattern doesn't match (no colon, empty groups, multiple colons, leading/trailing junk), raises `ValueError`.
 2. **Registry lookup** — checks that the captured `resource` group exists as a key in `PERMISSION_REGISTRY`, and that the captured `action` group is in `PERMISSION_REGISTRY[resource]`. If not, raises `ValueError`.
 
 This separates format validation (regex) from semantic validation (registry lookup).
