@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import functools
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import TYPE_CHECKING, cast
 
 import ag_ui.core
@@ -20,7 +19,7 @@ from _ravnar.observability import configure_logging, configure_tracing, traced
 from _ravnar.utils import resolve_forward_references
 
 from .api import make_router as make_api_router
-from .config import BaseConfig, Config
+from .config import AgentConfig, BaseConfig, Config
 from .database import Database
 from .mixin import SetupTeardownMixin
 from .version import __version__
@@ -117,20 +116,50 @@ class Ravnar:
 
 
 class AgentHandler:
-    def __init__(self, agent_factories: Mapping[str, Callable[[], Agent]]) -> None:
-        self._agents = {id: agent_factory() for id, agent_factory in agent_factories.items()}
+    def __init__(self, agent_config: AgentConfig) -> None:
+        self._static_agents: dict[str, Agent] = {id: factory() for id, factory in agent_config.static.items()}
+        self._dynamic_agents: dict[str, Agent] = {}
         self._event_encoder = ag_ui.encoder.EventEncoder()
+        self._dynamic_enabled = agent_config.dynamic.enabled
 
-    @functools.cached_property
-    def configs(self) -> list[schema.AgentConfig]:
+    def infos(self) -> list[schema.AgentInfo]:
+        agents = dict(self._static_agents)
+        if self._dynamic_enabled:
+            agents.update(self._dynamic_agents)
         return [
-            schema.AgentConfig(id=id, capabilities=agent.get_capabilities(), quick_prompts=agent.get_quick_prompts())
-            for id, agent in self._agents.items()
+            schema.AgentInfo(
+                id=id,
+                capabilities=agent.get_capabilities(),
+                quick_prompts=agent.get_quick_prompts(),
+            )
+            for id, agent in agents.items()
         ]
 
+    @property
+    def dynamic_enabled(self) -> bool:
+        return self._dynamic_enabled
+
+    def _get_agent(self, agent_id: str) -> Agent:
+        if agent_id in self._static_agents:
+            return self._static_agents[agent_id]
+        if agent_id in self._dynamic_agents:
+            return self._dynamic_agents[agent_id]
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+
     def assert_available(self, agent_id: str) -> None:
-        if agent_id not in self._agents:
+        self._get_agent(agent_id)
+
+    def add_agent(self, agent_id: str, agent: Agent) -> None:
+        if agent_id in self._static_agents or agent_id in self._dynamic_agents:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Agent ID already exists")
+        self._dynamic_agents[agent_id] = agent
+
+    def remove_agent(self, agent_id: str) -> None:
+        if agent_id in self._static_agents:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Static agents cannot be deleted")
+        if agent_id not in self._dynamic_agents:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+        del self._dynamic_agents[agent_id]
 
     def _sse_encoder(self, data: fastsse.Data) -> bytes:
         return self._event_encoder.encode(cast(ag_ui.core.Event, data)).encode()
@@ -142,8 +171,7 @@ class AgentHandler:
         *,
         callback: Callable[[EventProcessor], Awaitable[None]] | None = None,
     ) -> fastsse.Response:
-        self.assert_available(agent_id)
-        agent = self._agents[agent_id]
+        agent = self._get_agent(agent_id)
 
         event_processor = EventProcessor(
             thread_id=run_agent_input.thread_id,

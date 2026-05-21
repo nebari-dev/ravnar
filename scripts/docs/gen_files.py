@@ -22,7 +22,7 @@ def main():
 
 
 def openapi_specification() -> None:
-    app = Ravnar(BaseConfig()).app
+    app = Ravnar(BaseConfig.model_validate({"agents": {"dynamic": {"enabled": True}}})).app
     openapi_json = fastapi.openapi.utils.get_openapi(
         title=app.title,
         version=app.version,
