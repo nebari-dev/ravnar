@@ -2,14 +2,14 @@
 
 ## Summary
 
-Add task-level authorization to ravnar's API by introducing a flat list of permissions on the `schema.User` model. Permissions are ephemeral, provided exclusively by the Authenticator on each request, and never stored by ravnar. A new factory dependency `authorized_user_with(*permissions)` gates each endpoint, checking that the authenticated user possesses all required permissions. A `require_permissions` decorator provides the same check for non-endpoint functions. Existing item-level authorization (user-scoped data isolation) is untouched.
+Add task-level authorization to ravnar's API by introducing a flat list of permissions on the `schema.User` model. Permissions are ephemeral, provided exclusively by the Authenticator on each request, and never stored by ravnar. A new factory dependency `authorized_user_with(*permissions)` gates each endpoint, checking that the authenticated user possesses all required permissions. A plain `assert_permissions(user, *permissions)` function provides the same check for internal functions. Existing item-level authorization (user-scoped data isolation) is untouched.
 
 ## Goals
 
 - Gate every API endpoint behind task-level authorization using a permission system.
 - Keep permissions ephemeral — sourced from the Authenticator, never persisted by ravnar.
 - Make authz transparent to endpoint logic via a `Depends()` factory.
-- Provide a `require_permissions` decorator for internal functions that need permission checks without being FastAPI endpoints.
+- Provide a plain `assert_permissions` function for internal functions that need permission checks without being FastAPI endpoints.
 - Preserve existing item-level authorization (user sees only their own threads, files, etc.).
 - Require no database changes, no admin interface, and no user management features.
 
@@ -64,58 +64,53 @@ Endpoints that require authentication but no specific permission use `authorized
 
 ### New Module: `auth.py`
 
-A new internal module at `src/_ravnar/auth.py` houses the `User` model, `Permission` type, permission registry, `ALL_PERMISSIONS` constant, and the authorization factory.
+A new internal module at `src/_ravnar/auth.py` houses the `User` model, `Permission` type, permission registry, `ALL_PERMISSIONS` constant, the authorization factory, and the `assert_permissions` function.
 
 #### Models and Types (moved from `schema/misc.py`)
 
 - **`User`** — moved from `schema/misc.py` to `auth.py`. `schema/__init__.py` imports it from `auth.py` instead. This avoids circular imports because `auth.py` only needs `BaseModel` from `schema/misc.py`, which has no dependency on `User`.
-- **`Permission`** — `Annotated[str, AfterValidator(...)]` that validates against the permission registry.
+- **`Permission`** — `Annotated[str, AfterValidator(...)]` that validates against the permission registry using a regex with named groups, followed by registry lookup.
 
 #### Constants
 
 - **`PERMISSION_REGISTRY`** — `{resource: [actions]}` dictionary defining all valid permissions.
 - **`ALL_PERMISSIONS`** — `frozenset` of all valid permissions derived from the registry. Used as the default permission set for unauthenticated environments and the debug authenticator.
 
-#### Core Permission-Check Logic
+#### `assert_permissions` Function
 
-A shared internal function performs the actual permission check:
+A plain function that checks a user's permissions and raises `HTTPException(403)` if any are missing:
 
 ```python
-def _check_permissions(user: schema.User, required: frozenset[str]) -> None:
+def assert_permissions(user: schema.User, *permissions: str) -> None:
     """Raise HTTPException(403) if user lacks any required permission."""
 ```
 
-This is used by both the factory and the decorator to avoid duplication.
+It is a module-level function, not returned by the factory. Any module that needs permission checks on internal functions can import it directly from `_ravnar.auth`. The caller passes the `user` object explicitly — no signature inspection, no decorators.
 
 #### `make_authorized_user_factory`
 
 ```python
 def make_authorized_user_factory(
     security_config: SecurityConfig,
-) -> tuple[Callable[..., Awaitable[schema.User]], Callable[..., Any], Callable[..., Callable]]:
-    """Returns (authenticated_user, authorized_user_with, require_permissions)."""
+) -> Callable[..., Any]:
+    """Returns authorized_user_with."""
 ```
 
 The function:
 
-1. **Creates `authenticated_user`** from `security_config.authenticator`:
+1. **Creates `authenticated_user` internally** from `security_config.authenticator`:
    - If no authenticator is configured, returns a default user with **`ALL_PERMISSIONS`** (full admin).
    - If configured, instantiates the authenticator and resolves forward references on its `authenticate` method.
+   - This callable is **never returned** — it is used only internally by the `authorized_user_with` closure.
 
 2. **Returns `authorized_user_with`** — a factory that takes `*permissions: str` and returns a FastAPI dependency:
-   - The returned dependency accepts `user: schema.User = Depends(authenticated_user)` and checks that all required permissions are present in `user.permissions`.
+   - The returned dependency accepts `user: schema.User = Depends(authenticated_user)` and checks that all required permissions are present in `user.permissions` (delegating to `assert_permissions`).
    - If no permissions are passed (`authorized_user_with()`), it only authenticates the user without any permission gate.
    - Missing permissions raise `HTTPException(status_code=403, detail="Insufficient permissions")`.
 
-3. **Returns `require_permissions`** — a decorator that wraps a function (sync or async) and checks permissions before executing:
-   - The wrapper inspects the wrapped function's kwargs for a `user: schema.User` parameter.
-   - Delegates to `_check_permissions` (same core logic as the factory).
-   - Raises `HTTPException(status_code=403, detail="Insufficient permissions")` on failure.
-   - Used on internal functions like `hydrate_files` that need permission checks without being FastAPI endpoints.
-
 The `authenticated_user` reference is captured in the closure of `authorized_user_with`, so FastAPI deduplicates the auth call across multiple `Depends()` invocations in the same request.
 
-This module is only imported from `core.py`. The `authorized_user_with` factory and `require_permissions` decorator are then passed to router factories.
+This module is only imported from `core.py`. The `authorized_user_with` factory is then passed to router factories.
 
 ### Endpoint Dependency Pattern
 
@@ -136,9 +131,22 @@ Endpoints that need authentication but no permission check use:
 user: schema.User = Depends(authorized_user_with())
 ```
 
-#### `require_permissions` Decorator
+#### `assert_permissions` for Internal Functions
 
-For internal functions that are not FastAPI endpoints (e.g., `hydrate_files` in `threads.py`), the `@require_permissions("files:read", "files:write")` decorator provides the same permission check. The wrapped function must accept a `user: schema.User` kwarg.
+For internal functions that are not FastAPI endpoints (e.g., `hydrate_files` in `threads.py`), `assert_permissions` is called directly at the top of the function body:
+
+```python
+async def hydrate_files(
+    messages: list[schema.AugmentedMessage],
+    *,
+    user: schema.User,
+    file_handler: FileHandler,
+) -> None:
+    assert_permissions(user, "files:read", "files:write")
+    ...
+```
+
+No decorator, no magic. The caller passes `user` explicitly and the check runs synchronously before the function body.
 
 ### Router-Level Dependencies
 
@@ -157,10 +165,10 @@ Router-level dependencies are **removed** from all sub-routers (`threads.py`, `f
 `core.py` becomes the single caller of `make_authorized_user_factory`:
 
 ```python
-authenticated_user, authorized_user_with, require_permissions = make_authorized_user_factory(config.security)
+authorized_user_with = make_authorized_user_factory(config.security)
 ```
 
-The `authorized_user_with` factory and `require_permissions` decorator are passed to `make_api_router()` and through to sub-routers.
+The `authorized_user_with` factory is passed to `make_api_router()` and through to sub-routers.
 
 ### Schema Changes
 
@@ -184,12 +192,12 @@ Permission = Annotated[
 ]
 ```
 
-The validator checks:
-1. Format: exactly one colon separator, non-empty resource and action parts.
-2. Resource exists in `PERMISSION_REGISTRY`.
-3. Action exists in `PERMISSION_REGISTRY[resource]`.
+The validator works in two steps:
 
-Any violation raises `ValueError`.
+1. **Regex with named groups** — matches the pattern `(?P<resource>[^:]+):(?P<action>[^:]+)`. If the pattern doesn't match (no colon, empty groups, multiple colons), raises `ValueError`.
+2. **Registry lookup** — checks that the captured `resource` group exists as a key in `PERMISSION_REGISTRY`, and that the captured `action` group is in `PERMISSION_REGISTRY[resource]`. If not, raises `ValueError`.
+
+This separates format validation (regex) from semantic validation (registry lookup).
 
 ### Authenticator Changes
 
@@ -252,7 +260,7 @@ No changes to `SecurityConfig`. Authenticators are configured via `ImportStringW
 
 ### File Hydration Permission Check
 
-The `hydrate_files` function in `threads.py` requires `files:read` and `files:write` but only when file content is actually present in the run messages. Rather than gating the entire `POST /api/threads/{id}/run` endpoint with these permissions (which would block users who never use files), the `@require_permissions("files:read", "files:write")` decorator is applied directly to `hydrate_files`.
+The `hydrate_files` function in `threads.py` requires `files:read` and `files:write` but only when file content is actually present in the run messages. Rather than gating the entire `POST /api/threads/{id}/run` endpoint with these permissions (which would block users who never use files), `assert_permissions(user, "files:read", "files:write")` is called at the top of `hydrate_files`.
 
 ### `GET /api/user` Response
 
@@ -271,15 +279,15 @@ The endpoint returns `schema.User` as-is, which now includes the `permissions` l
 
 ### Unit Tests
 
-- **`Permission` validator**: Valid formats accepted, invalid formats rejected, container dedup/sort verified, unknown resource/action rejected.
+- **`Permission` validator**: Valid formats accepted, invalid formats rejected (no colon, empty groups, multiple colons), registry lookup rejects unknown resource/action, container dedup/sort verified.
 - **`authorized_user_with` factory**:
   - User with all required permissions → returns user.
   - User missing one permission → 403.
   - User with no permissions calling `authorized_user_with()` (no args) → returns user.
   - Empty permission check with non-empty user permissions → returns user.
-- **`require_permissions` decorator**:
-  - Decorated function with correct permissions → executes normally.
-  - Decorated function with missing permissions → 403, function body not executed.
+- **`assert_permissions` function**:
+  - User with correct permissions → no-op, function continues.
+  - User with missing permissions → 403.
 - **Authenticator changes**:
   - `DebugAuthenticator` returns full permission set.
   - `ForwardedUserAuthenticator` parses permissions from header, handles missing header.
@@ -289,7 +297,7 @@ The endpoint returns `schema.User` as-is, which now includes the `permissions` l
 
 - **Permission-gated endpoints**: Test each endpoint with a user that has the correct permission (200) and without it (403).
 - **Auth-only endpoints**: `GET /api/user` and `GET /api/config` work with any authenticated user, even with no permissions.
-- **File hydration in runs**: Verify that `POST /api/threads/{id}/run` with file content requires `files:read` and `files:write` via the `@require_permissions` decorator.
+- **File hydration in runs**: Verify that `POST /api/threads/{id}/run` with file content requires `files:read` and `files:write` via `assert_permissions`.
 
 ### Test Fixtures
 
