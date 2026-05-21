@@ -228,4 +228,6 @@ Test `extract_capabilities()` on both wrapper classes with representative agent 
 
 ## Open Questions
 
-1. **Agno HITL attribute verification** — The `humanInTheLoop.approvals` detection for Agno agents relies on checking whether any extracted `Function` has `requires_confirmation=True` or `requires_user_input=True`. The implementer must verify that these are actual attributes on the Agno `Function` class (or on the original tool config that survives extraction). If they are not present on the extracted `Function` objects, this detection mechanism needs to be adjusted — possibly by inspecting the raw tool configuration before extraction or by using different attribute names. This should be determined during implementation.
+_Resolved during implementation:_
+
+1. **Agno HITL attribute verification** — Resolved. `requires_confirmation` and `requires_user_input` are confirmed to be attributes on the Agno `Function` class (see `agno.tools.function.Function.model_fields`). Both default to `None` and are correctly propagated when tools are extracted from both `Toolkit.functions` and `Function.from_callable()` results.

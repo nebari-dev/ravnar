@@ -13,6 +13,7 @@ from .mixin import SetupTeardownMixin
 
 if TYPE_CHECKING:
     import agno.agent
+    import agno.tools
     import pydantic_ai
 
     from _ravnar.schema import QuickPrompt
@@ -128,10 +129,7 @@ class PydanticAiAgentWrapper(_AgentBase):
         self._agent = agent
 
         if capabilities is None:
-            capabilities = ag_ui.core.AgentCapabilities(
-                identity=ag_ui.core.IdentityCapabilities(name=agent.name),
-                transport=ag_ui.core.TransportCapabilities(streaming=True),
-            )
+            capabilities = self.extract_capabilities(agent)
 
         super().__init__(capabilities=capabilities, quick_prompts=quick_prompts)
 
@@ -139,6 +137,94 @@ class PydanticAiAgentWrapper(_AgentBase):
         from pydantic_ai.ui.ag_ui import AGUIAdapter
 
         return AGUIAdapter(agent=self._agent, run_input=input, accept="text/event-stream").run_stream()  # type: ignore[return-value]
+
+    @staticmethod
+    def extract_capabilities(agent: pydantic_ai.Agent) -> ag_ui.core.AgentCapabilities:
+        from pydantic_ai._output import TextOutputSchema
+
+        # --- identity ---
+        identity_kwargs: dict[str, Any] = {"name": agent.name}
+        if agent.description is not None:
+            identity_kwargs["description"] = agent.description
+        if getattr(agent, "_metadata", None) is not None:
+            identity_kwargs["metadata"] = agent._metadata
+        identity_kwargs["type"] = "pydantic-ai"
+
+        # --- tools ---
+        tool_items: list[ag_ui.core.Tool] = []
+        function_toolset = getattr(agent, "_function_toolset", None)
+        if function_toolset is not None and hasattr(function_toolset, "tools"):
+            for tool in function_toolset.tools.values():
+                tool_items.append(
+                    ag_ui.core.Tool(
+                        name=tool.name,
+                        description=tool.description or "",
+                        parameters=tool.function_schema.json_schema,
+                    )
+                )
+
+        tools_capabilities = ag_ui.core.ToolsCapabilities(
+            supported=True,
+            items=tool_items if tool_items else None,
+            client_provided=True,
+        )
+
+        # --- output ---
+        output_schema = getattr(agent, "_output_schema", None)
+        structured_output: bool | None = None
+        if output_schema is not None and not isinstance(output_schema, TextOutputSchema):
+            structured_output = True
+
+        output_capabilities: ag_ui.core.OutputCapabilities | None = None
+        if structured_output is not None:
+            output_capabilities = ag_ui.core.OutputCapabilities(structured_output=structured_output)
+
+        # --- reasoning, human_in_the_loop, multimodal ---
+        reasoning_supported: bool | None = None
+        approvals: bool | None = None
+        multimodal_image: bool | None = None
+
+        root_cap = getattr(agent, "_root_capability", None)
+        if root_cap is not None:
+            capabilities_list = getattr(root_cap, "capabilities", [])
+            for cap in capabilities_list:
+                # Skip factory callables (they require RunContext to resolve)
+                if callable(cap) and not hasattr(cap, "__class__"):
+                    continue
+                cap_type = type(cap)
+                cap_module = cap_type.__module__
+                cap_name = cap_type.__name__
+
+                if "Thinking" in cap_name and "pydantic_ai" in cap_module:
+                    reasoning_supported = True
+                elif "HandleDeferredToolCalls" in cap_name and "pydantic_ai" in cap_module:
+                    approvals = True
+                elif "ImageGeneration" in cap_name and "pydantic_ai" in cap_module:
+                    multimodal_image = True
+
+        reasoning_capabilities: ag_ui.core.ReasoningCapabilities | None = None
+        if reasoning_supported is not None:
+            reasoning_capabilities = ag_ui.core.ReasoningCapabilities(supported=reasoning_supported)
+
+        human_in_the_loop: ag_ui.core.HumanInTheLoopCapabilities | None = None
+        if approvals is not None:
+            human_in_the_loop = ag_ui.core.HumanInTheLoopCapabilities(approvals=approvals)
+
+        multimodal_capabilities: ag_ui.core.MultimodalCapabilities | None = None
+        if multimodal_image is not None:
+            multimodal_capabilities = ag_ui.core.MultimodalCapabilities(
+                output=ag_ui.core.MultimodalOutputCapabilities(image=multimodal_image)
+            )
+
+        return ag_ui.core.AgentCapabilities(
+            identity=ag_ui.core.IdentityCapabilities(**identity_kwargs),
+            transport=ag_ui.core.TransportCapabilities(streaming=True),
+            tools=tools_capabilities,
+            output=output_capabilities,
+            reasoning=reasoning_capabilities,
+            human_in_the_loop=human_in_the_loop,
+            multimodal=multimodal_capabilities,
+        )
 
 
 class AgnoAgentWrapper(_AgentBase):
@@ -154,10 +240,7 @@ class AgnoAgentWrapper(_AgentBase):
         self._agent = agent
 
         if capabilities is None:
-            capabilities = ag_ui.core.AgentCapabilities(
-                identity=ag_ui.core.IdentityCapabilities(name=agent.name),
-                transport=ag_ui.core.TransportCapabilities(streaming=True),
-            )
+            capabilities = self.extract_capabilities(agent)
 
         super().__init__(capabilities=capabilities, quick_prompts=quick_prompts)
 
@@ -165,3 +248,115 @@ class AgnoAgentWrapper(_AgentBase):
         from agno.os.interfaces.agui.router import run_agent
 
         return run_agent(self._agent, input)  # type: ignore[return-value]
+
+    @staticmethod
+    def extract_capabilities(agent: agno.agent.Agent) -> ag_ui.core.AgentCapabilities:
+        from agno.tools import Function, Toolkit
+
+        # --- identity ---
+        identity_kwargs: dict[str, Any] = {"name": agent.name}
+        if agent.description is not None:
+            identity_kwargs["description"] = agent.description
+        if getattr(agent, "metadata", None) is not None:
+            identity_kwargs["metadata"] = agent.metadata
+        identity_kwargs["type"] = "agno"
+
+        # --- tools ---
+        tool_items: list[ag_ui.core.Tool] = []
+        hitl_detected = False
+        raw_tools = getattr(agent, "tools", None) or []
+
+        for tool in raw_tools:
+            if isinstance(tool, Toolkit):
+                toolkit_functions = getattr(tool, "functions", {})
+                for fn in toolkit_functions.values():
+                    if isinstance(fn, Function):
+                        tool_items.append(
+                            ag_ui.core.Tool(
+                                name=fn.name,
+                                description=fn.description or "",
+                                parameters=fn.parameters,
+                            )
+                        )
+                        if (
+                            getattr(fn, "requires_confirmation", False)
+                            or getattr(fn, "requires_user_input", False)
+                        ):
+                            hitl_detected = True
+            elif isinstance(tool, Function):
+                tool_items.append(
+                    ag_ui.core.Tool(
+                        name=tool.name,
+                        description=tool.description or "",
+                        parameters=tool.parameters,
+                    )
+                )
+                if (
+                    getattr(tool, "requires_confirmation", False)
+                    or getattr(tool, "requires_user_input", False)
+                ):
+                    hitl_detected = True
+            elif callable(tool):
+                fn = Function.from_callable(tool)
+                tool_items.append(
+                    ag_ui.core.Tool(
+                        name=fn.name,
+                        description=fn.description or "",
+                        parameters=fn.parameters,
+                    )
+                )
+
+        tools_capabilities = ag_ui.core.ToolsCapabilities(
+            supported=True,
+            items=tool_items if tool_items else None,
+            client_provided=True,
+        )
+
+        # --- output ---
+        structured_output: bool | None = None
+        if getattr(agent, "structured_outputs", False) is True:
+            structured_output = True
+        elif getattr(agent, "output_schema", None) is not None:
+            structured_output = True
+
+        output_capabilities: ag_ui.core.OutputCapabilities | None = None
+        if structured_output is not None:
+            output_capabilities = ag_ui.core.OutputCapabilities(structured_output=structured_output)
+
+        # --- reasoning ---
+        reasoning_supported: bool | None = None
+        reasoning_val = getattr(agent, "reasoning", None)
+        if reasoning_val is not None:
+            reasoning_supported = bool(reasoning_val)
+
+        reasoning_capabilities: ag_ui.core.ReasoningCapabilities | None = None
+        if reasoning_supported is not None:
+            reasoning_capabilities = ag_ui.core.ReasoningCapabilities(supported=reasoning_supported)
+
+        # --- multiAgent ---
+        multi_agent_capabilities: ag_ui.core.MultiAgentCapabilities | None = None
+        reasoning_agent = getattr(agent, "reasoning_agent", None)
+        if reasoning_agent is not None:
+            sub_agent_info = ag_ui.core.SubAgentInfo(
+                name=reasoning_agent.name,
+                description=getattr(reasoning_agent, "description", None),
+            )
+            multi_agent_capabilities = ag_ui.core.MultiAgentCapabilities(
+                supported=True,
+                sub_agents=[sub_agent_info],
+            )
+
+        # --- human_in_the_loop ---
+        human_in_the_loop: ag_ui.core.HumanInTheLoopCapabilities | None = None
+        if hitl_detected:
+            human_in_the_loop = ag_ui.core.HumanInTheLoopCapabilities(approvals=True)
+
+        return ag_ui.core.AgentCapabilities(
+            identity=ag_ui.core.IdentityCapabilities(**identity_kwargs),
+            transport=ag_ui.core.TransportCapabilities(streaming=True),
+            tools=tools_capabilities,
+            output=output_capabilities,
+            reasoning=reasoning_capabilities,
+            multi_agent=multi_agent_capabilities,
+            human_in_the_loop=human_in_the_loop,
+        )
