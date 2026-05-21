@@ -19,7 +19,7 @@ def make_router(*, agent_handler: AgentHandler, authorized_user_with: Callable[.
 
     @router.get("")
     async def list_agents(
-        user: User = Depends(authorized_user_with("agents:read")),
+        user: User = Depends(authorized_user_with("agents:read")),  # noqa: B008
     ) -> list[schema.AgentInfo]:
         return agent_handler.infos()
 
@@ -28,7 +28,7 @@ def make_router(*, agent_handler: AgentHandler, authorized_user_with: Callable[.
         *,
         agent_id: Annotated[str, Path(alias="agentId")],
         run_agent_input: ag_ui.core.RunAgentInput,
-        user: User = Depends(authorized_user_with("agents:read")),
+        user: User = Depends(authorized_user_with("agents:read")),  # noqa: B008
     ) -> fastsse.Response:
         return await agent_handler.run(agent_id, run_agent_input)
 
@@ -52,7 +52,7 @@ def _make_dynamic_agents_router(
     @router.post("", description=description)
     async def register_agent(
         data: schema.RegisterAgentData,
-        user: User = Depends(authorized_user_with("agents:write")),
+        user: User = Depends(authorized_user_with("agents:write")),  # noqa: B008
     ) -> schema.AgentInfo:
         agent = data.agent()
         agent_handler.add_agent(data.id, agent)
@@ -65,6 +65,6 @@ def _make_dynamic_agents_router(
     @router.delete("/{agentId}", description=description)
     async def unregister_agent(
         agent_id: Annotated[str, Path(alias="agentId")],
-        user: User = Depends(authorized_user_with("agents:delete")),
+        user: User = Depends(authorized_user_with("agents:delete")),  # noqa: B008
     ) -> None:
         agent_handler.remove_agent(agent_id)

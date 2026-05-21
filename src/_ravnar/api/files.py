@@ -16,7 +16,7 @@ def make_router(*, file_handler: FileHandler, authorized_user_with: Callable[...
     @router.post("")
     async def upload_file(
         *,
-        user: User = Depends(authorized_user_with("files:write")),
+        user: User = Depends(authorized_user_with("files:write")),  # noqa: B008
         file_input_content: Annotated[FileInputContent, Body()],
     ) -> FileInputContent:
         file, _ = await file_handler.add(file_input_content, user_id=user.id)
@@ -25,7 +25,7 @@ def make_router(*, file_handler: FileHandler, authorized_user_with: Callable[...
     @router.get("/{id}")
     async def get_file(
         *,
-        user: User = Depends(authorized_user_with("files:read")),
+        user: User = Depends(authorized_user_with("files:read")),  # noqa: B008
         id: uuid.UUID,
     ) -> FileInputContent:
         return convert_file_to_input_content(await file_handler.get(id, user_id=user.id))
@@ -33,7 +33,7 @@ def make_router(*, file_handler: FileHandler, authorized_user_with: Callable[...
     @router.get("/{id}/content")
     async def read_file(
         *,
-        user: User = Depends(authorized_user_with("files:read")),
+        user: User = Depends(authorized_user_with("files:read")),  # noqa: B008
         id: uuid.UUID,
     ) -> Response:
         mime_type, content = await file_handler.read(id, user_id=user.id)
@@ -46,7 +46,7 @@ def make_router(*, file_handler: FileHandler, authorized_user_with: Callable[...
     @router.delete("/{id}")
     async def delete_file(
         *,
-        user: User = Depends(authorized_user_with("files:delete")),
+        user: User = Depends(authorized_user_with("files:delete")),  # noqa: B008
         id: uuid.UUID,
     ) -> None:
         await file_handler.delete(id, user_id=user.id)
