@@ -22,7 +22,6 @@ __all__ = [
     "RenameThreadData",
     "TModel",
     "Thread",
-    "User",
     "create_str_literal",
 ]
 
@@ -46,4 +45,4 @@ from .api import (
     RenameThreadData,
     Thread,
 )
-from .misc import APIRouter, BaseModel, Page, Pagination, TModel, User, create_str_literal
+from .misc import APIRouter, BaseModel, Page, Pagination, TModel, create_str_literal

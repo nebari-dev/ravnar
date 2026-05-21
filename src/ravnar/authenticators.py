@@ -8,6 +8,7 @@ __all__ = [
     "User",
 ]
 
+from _ravnar.auth import User
 from _ravnar.authenticators import (
     Authenticator,
     BearerTokenAuthenticator,
@@ -16,7 +17,6 @@ from _ravnar.authenticators import (
     OIDCTokenValidator,
     TokenValidator,
 )
-from _ravnar.schema import User
 
 # isort: split
 

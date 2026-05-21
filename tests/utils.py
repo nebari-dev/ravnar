@@ -5,7 +5,7 @@ from fastapi import Depends
 from fastapi.security import APIKeyHeader
 from fastapi.testclient import TestClient as _TestClient
 
-from _ravnar import schema
+from _ravnar.auth import User
 from _ravnar.config import BaseConfig
 from _ravnar.core import Ravnar
 from ravnar.authenticators import Authenticator
@@ -26,10 +26,14 @@ class TestClient(_TestClient):
 
 
 class ForwardedUserAuthenticator(Authenticator):
-    """Forwarded User Authenticator"""
+    """Forwarded User Authenticator for testing"""
 
-    async def authenticate(self, id: Annotated[str | None, Depends(APIKeyHeader(name="User", auto_error=False))]):
-        return schema.User(id=id or "pytest")
+    async def authenticate(
+        self,
+        id: Annotated[str | None, Depends(APIKeyHeader(name="User", auto_error=False))],
+        permissions: Annotated[str | None, Depends(APIKeyHeader(name="Permissions", auto_error=False))],
+    ):
+        return User(id=id or "pytest", permissions=permissions.split(",") if permissions is not None else [])
 
 
 @contextlib.contextmanager

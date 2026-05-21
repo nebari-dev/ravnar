@@ -13,6 +13,7 @@ from fastapi import Depends, HTTPException, Path, Query, status
 from opentelemetry import trace
 
 from _ravnar import schema
+from _ravnar.auth import User, assert_permissions
 from _ravnar.file_storage import FileHandler, WrappedMetadata
 from _ravnar.observability import traced
 from _ravnar.utils import as_awaitable, now
@@ -35,14 +36,14 @@ def make_router(
     database: Database,
     file_handler: FileHandler,
     agent_handler: AgentHandler,
-    authenticated_user: Callable[..., Any],
+    authorized_user_with: Callable[..., Any],
 ) -> schema.APIRouter:
-    router = schema.APIRouter(tags=["Threads"], dependencies=[Depends(authenticated_user)])
+    router = schema.APIRouter(tags=["Threads"])
 
     @router.post("")
     async def create_thread(
         *,
-        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        user: User = Depends(authorized_user_with("threads:write")),
         data: schema.CreateThreadData,
     ) -> schema.Thread:
         agent_handler.assert_available(data.agent_id)
@@ -54,7 +55,7 @@ def make_router(
     @router.get("")
     async def get_threads(
         *,
-        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        user: User = Depends(authorized_user_with("threads:read")),
         pagination: Annotated[schema.Pagination[ThreadsSortBy], Query()],
     ) -> schema.Page[schema.Thread]:
         return schema.Page[schema.Thread].model_validate(
@@ -64,14 +65,14 @@ def make_router(
     @router.get("/{threadId}")
     async def get_thread(
         id: Annotated[str, Path(alias="threadId")],
-        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        user: User = Depends(authorized_user_with("threads:read")),
     ) -> schema.Thread:
         return schema.Thread.model_validate(await database.get_thread(user_id=user.id, id=id), from_attributes=True)
 
     @router.get("/{threadId}/messages")
     async def get_thread_messages(
         id: Annotated[str, Path(alias="threadId")],
-        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        user: User = Depends(authorized_user_with("threads:read")),
     ) -> list[schema.AugmentedMessage]:
         thread = await database.get_thread(user_id=user.id, id=id, with_messages=True)
         return pydantic.TypeAdapter(list[schema.AugmentedMessage]).validate_python(
@@ -81,7 +82,7 @@ def make_router(
     @router.sse("/{threadId}/run", methods=["POST"], response_model=schema.Event, tags=["Runs"])
     async def create_run(
         *,
-        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        user: User = Depends(authorized_user_with("threads:write")),
         thread_id: Annotated[str, Path(alias="threadId")],
         data: schema.CreateRunData,
     ) -> fastsse.Response:
@@ -117,9 +118,10 @@ def make_router(
     async def hydrate_files(
         messages: list[schema.AugmentedMessage],
         *,
-        user: schema.User,
+        user: User,
         file_handler: FileHandler,
     ) -> None:
+        assert_permissions(user, "files:read", "files:write")
         for m in messages:
             if not isinstance(m, schema.AugmentedUserMessage):
                 continue
@@ -143,7 +145,7 @@ def make_router(
     @router.post("/{threadId}/rename")
     async def rename_thread(
         *,
-        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        user: User = Depends(authorized_user_with("threads:write")),
         id: Annotated[str, Path(alias="threadId")],
         data: schema.RenameThreadData,
     ) -> schema.Thread:
@@ -154,7 +156,7 @@ def make_router(
     @router.delete("")
     async def delete_threads(
         *,
-        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        user: User = Depends(authorized_user_with("threads:delete")),
         data: schema.DeleteThreadsData,
     ) -> None:
         await database.delete_threads(user_id=user.id, ids=data.ids)
@@ -162,7 +164,7 @@ def make_router(
     @router.delete("/{threadId}")
     async def delete_thread(
         *,
-        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        user: User = Depends(authorized_user_with("threads:delete")),
         thread_id: Annotated[str, Path(alias="threadId")],
     ) -> None:
         await database.delete_threads(user_id=user.id, ids=[thread_id])
