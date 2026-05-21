@@ -306,9 +306,22 @@ for supported filesystems and protocols.
 
 ### Agents
 
-Mapping of [references](#plugins) to [ravnar.agents.Agent][]s. The key is used as identifier for the toolset.
+Either [dynamic agents have to be enabled](#enabling-dynamic-agents) or at least one [static agent](#static-agents) has
+to be configured.
 
-{{ config_options(["agents"]) }}
+#### Dynamic Agents
+
+##### Enabling Dynamic Agents
+
+Whether [references](#plugins) to [ravnar.agents.Agent][]s can be (un-)registered through the [REST API](./rest_api.md).
+
+{{ config_options(["agents", "dynamic", "enabled"]) }}
+
+#### Static Agents
+
+Mapping of [references](#plugins) to [ravnar.agents.Agent][]s. The key is used as identifier for the agent.
+
+{{ config_options(["agents", "static"]) }}
 
 !!! example
 
