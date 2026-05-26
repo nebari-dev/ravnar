@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import abc
+import dataclasses
 import textwrap
 import uuid
 from collections.abc import AsyncIterator
@@ -116,7 +117,16 @@ class SSEAgent(_AgentBase):
                 yield ta.validate_json(sse.data)
 
 
-class PydanticAiAgentWrapper(_AgentBase):
+@dataclasses.dataclass
+class _PydanticAiDynamicCapabilities:
+    tools: list[ag_ui.core.Tool]
+    reasoning_supported: bool | None
+    approvals: bool | None
+    image_output: bool | None
+    structured_output: bool | None
+
+
+class PydanticAiAgentWrapper(Agent):
     """Pydantic AI agent wrapper"""
 
     def __init__(
@@ -128,102 +138,123 @@ class PydanticAiAgentWrapper(_AgentBase):
     ) -> None:
         self._agent = agent
 
-        if capabilities is None:
-            capabilities = self.extract_capabilities(agent)
+        self._capabilities: ag_ui.core.AgentCapabilities
+        if capabilities is not None:
+            self._capabilities = capabilities
 
-        super().__init__(capabilities=capabilities, quick_prompts=quick_prompts)
+        if quick_prompts is None:
+            quick_prompts = []
+        self._quick_prompts = quick_prompts
+
+    async def setup(self) -> None:
+        if hasattr(self, "_capabilities"):
+            return
+
+        self._capabilities = await self.extract_capabilities(self._agent)
 
     def run(self, input: ag_ui.core.RunAgentInput) -> AsyncIterator[ag_ui.core.Event]:
         from pydantic_ai.ui.ag_ui import AGUIAdapter
 
         return AGUIAdapter(agent=self._agent, run_input=input, accept="text/event-stream").run_stream()  # type: ignore[return-value]
 
+    def get_capabilities(self) -> ag_ui.core.AgentCapabilities:
+        """The capabilities of the agent."""
+        return self._capabilities
+
+    def get_quick_prompts(self) -> list[QuickPrompt]:
+        """The quick prompts of the agent."""
+        return self._quick_prompts
+
     @staticmethod
-    def extract_capabilities(agent: pydantic_ai.Agent) -> ag_ui.core.AgentCapabilities:
-        from pydantic_ai._output import TextOutputSchema
+    async def extract_capabilities(
+        agent: pydantic_ai.Agent, *, ctx: pydantic_ai.RunContext | None = None
+    ) -> ag_ui.core.AgentCapabilities:
+        import pydantic_ai.models
+        from pydantic_ai.usage import RunUsage
 
-        # --- identity ---
-        identity_kwargs: dict[str, Any] = {"name": agent.name}
-        if agent.description is not None:
-            identity_kwargs["description"] = agent.description
-        if getattr(agent, "_metadata", None) is not None:
-            identity_kwargs["metadata"] = agent._metadata
-        identity_kwargs["type"] = "pydantic-ai"
-
-        # --- tools ---
-        tool_items: list[ag_ui.core.Tool] = []
-        function_toolset = getattr(agent, "_function_toolset", None)
-        if function_toolset is not None and hasattr(function_toolset, "tools"):
-            for tool in function_toolset.tools.values():
-                tool_items.append(
-                    ag_ui.core.Tool(
-                        name=tool.name,
-                        description=tool.description or "",
-                        parameters=tool.function_schema.json_schema,
-                    )
-                )
-
-        tools_capabilities = ag_ui.core.ToolsCapabilities(
-            supported=True,
-            items=tool_items if tool_items else None,
-            client_provided=True,
+        capabilities = ag_ui.core.AgentCapabilities(
+            identity=ag_ui.core.IdentityCapabilities(
+                name=agent.name,
+                description=agent.description,
+                type="pydantic-ai",
+            ),
+            transport=ag_ui.core.TransportCapabilities(streaming=True),
+            tools=ag_ui.core.ToolsCapabilities(
+                supported=True,
+                client_provided=True,
+            ),
         )
 
-        # --- output ---
-        output_schema = getattr(agent, "_output_schema", None)
-        structured_output: bool | None = None
-        if output_schema is not None and not isinstance(output_schema, TextOutputSchema):
-            structured_output = True
+        if ctx is None and isinstance(agent.model, pydantic_ai.models.Model):
+            ctx = pydantic_ai.RunContext(deps=None, model=agent.model, usage=RunUsage())
+        if ctx is not None:
+            dynamic_capabilities = await PydanticAiAgentWrapper._extract_dynamic_capabilities(agent, ctx=ctx)
 
-        output_capabilities: ag_ui.core.OutputCapabilities | None = None
-        if structured_output is not None:
-            output_capabilities = ag_ui.core.OutputCapabilities(structured_output=structured_output)
+            assert capabilities.tools is not None
+            capabilities.tools.items = dynamic_capabilities.tools
+            if dynamic_capabilities.reasoning_supported is not None:
+                capabilities.reasoning = ag_ui.core.ReasoningCapabilities(
+                    supported=dynamic_capabilities.reasoning_supported
+                )
+            if dynamic_capabilities.approvals is not None:
+                capabilities.human_in_the_loop = ag_ui.core.HumanInTheLoopCapabilities(
+                    approvals=dynamic_capabilities.approvals
+                )
+            if dynamic_capabilities.image_output is not None:
+                capabilities.multimodal = ag_ui.core.MultimodalCapabilities(
+                    output=ag_ui.core.MultimodalOutputCapabilities(image=dynamic_capabilities.image_output)
+                )
+            if dynamic_capabilities.structured_output is not None:
+                capabilities.output = ag_ui.core.OutputCapabilities(
+                    structured_output=dynamic_capabilities.structured_output
+                )
 
-        # --- reasoning, human_in_the_loop, multimodal ---
+        return capabilities
+
+    @staticmethod
+    async def _extract_dynamic_capabilities(
+        agent: pydantic_ai.Agent, *, ctx: pydantic_ai.RunContext
+    ) -> _PydanticAiDynamicCapabilities:
+        tools = [
+            ag_ui.core.Tool(
+                name=(td := tool.tool_def).name,
+                description=td.description or "",
+                parameters=td.parameters_json_schema,
+            )
+            for toolset in agent.toolsets
+            for tool in (await toolset.get_tools(ctx)).values()
+        ]
+
         reasoning_supported: bool | None = None
         approvals: bool | None = None
-        multimodal_image: bool | None = None
+        image_output: bool | None = None
 
-        root_cap = getattr(agent, "_root_capability", None)
-        if root_cap is not None:
-            capabilities_list = getattr(root_cap, "capabilities", [])
-            for cap in capabilities_list:
-                # Skip factory callables (they require RunContext to resolve)
-                if callable(cap) and not hasattr(cap, "__class__"):
-                    continue
-                cap_type = type(cap)
-                cap_module = cap_type.__module__
-                cap_name = cap_type.__name__
+        if agent.root_capability is not None:
+            from pydantic_ai.capabilities import HandleDeferredToolCalls, ImageGeneration, Thinking
 
-                if "Thinking" in cap_name and "pydantic_ai" in cap_module:
+            for capability in agent.root_capability.capabilities:
+                if isinstance(capability, Thinking):
                     reasoning_supported = True
-                elif "HandleDeferredToolCalls" in cap_name and "pydantic_ai" in cap_module:
+                elif isinstance(capability, HandleDeferredToolCalls):
                     approvals = True
-                elif "ImageGeneration" in cap_name and "pydantic_ai" in cap_module:
-                    multimodal_image = True
+                elif isinstance(capability, ImageGeneration):
+                    image_output = True
 
-        reasoning_capabilities: ag_ui.core.ReasoningCapabilities | None = None
-        if reasoning_supported is not None:
-            reasoning_capabilities = ag_ui.core.ReasoningCapabilities(supported=reasoning_supported)
+        if not isinstance(agent.output_type, type):
+            structured_output = None
+        elif issubclass(agent.output_type, str):
+            structured_output = False
+        elif issubclass(agent.output_type, pydantic.BaseModel):
+            structured_output = True
+        else:
+            structured_output = None
 
-        human_in_the_loop: ag_ui.core.HumanInTheLoopCapabilities | None = None
-        if approvals is not None:
-            human_in_the_loop = ag_ui.core.HumanInTheLoopCapabilities(approvals=approvals)
-
-        multimodal_capabilities: ag_ui.core.MultimodalCapabilities | None = None
-        if multimodal_image is not None:
-            multimodal_capabilities = ag_ui.core.MultimodalCapabilities(
-                output=ag_ui.core.MultimodalOutputCapabilities(image=multimodal_image)
-            )
-
-        return ag_ui.core.AgentCapabilities(
-            identity=ag_ui.core.IdentityCapabilities(**identity_kwargs),
-            transport=ag_ui.core.TransportCapabilities(streaming=True),
-            tools=tools_capabilities,
-            output=output_capabilities,
-            reasoning=reasoning_capabilities,
-            human_in_the_loop=human_in_the_loop,
-            multimodal=multimodal_capabilities,
+        return _PydanticAiDynamicCapabilities(
+            tools=tools,
+            reasoning_supported=reasoning_supported,
+            approvals=approvals,
+            image_output=image_output,
+            structured_output=structured_output,
         )
 
 
@@ -253,110 +284,62 @@ class AgnoAgentWrapper(_AgentBase):
     def extract_capabilities(agent: agno.agent.Agent) -> ag_ui.core.AgentCapabilities:
         from agno.tools import Function, Toolkit
 
-        # --- identity ---
-        identity_kwargs: dict[str, Any] = {"name": agent.name}
-        if agent.description is not None:
-            identity_kwargs["description"] = agent.description
-        if getattr(agent, "metadata", None) is not None:
-            identity_kwargs["metadata"] = agent.metadata
-        identity_kwargs["type"] = "agno"
+        tools: list[ag_ui.core.Tool] | None = None
+        approvals: bool | None = None
+        if isinstance(agent.tools, list):
+            tools = []
+            approvals = False
+            for tool in agent.tools:
+                functions: list[Function]
+                if isinstance(tool, Toolkit):
+                    functions = [fn for fn in tool.functions.values() if isinstance(fn, Function)]
+                elif isinstance(tool, Function):
+                    functions = [tool]
+                elif callable(tool):
+                    functions = [Function.from_callable(tool)]
+                else:
+                    continue
 
-        # --- tools ---
-        tool_items: list[ag_ui.core.Tool] = []
-        hitl_detected = False
-        raw_tools = getattr(agent, "tools", None) or []
-
-        for tool in raw_tools:
-            if isinstance(tool, Toolkit):
-                toolkit_functions = getattr(tool, "functions", {})
-                for fn in toolkit_functions.values():
-                    if isinstance(fn, Function):
-                        tool_items.append(
-                            ag_ui.core.Tool(
-                                name=fn.name,
-                                description=fn.description or "",
-                                parameters=fn.parameters,
-                            )
+                for fn in functions:
+                    tools.append(
+                        ag_ui.core.Tool(
+                            name=fn.name,
+                            description=fn.description or "",
+                            parameters=fn.parameters,
                         )
-                        if (
-                            getattr(fn, "requires_confirmation", False)
-                            or getattr(fn, "requires_user_input", False)
-                        ):
-                            hitl_detected = True
-            elif isinstance(tool, Function):
-                tool_items.append(
-                    ag_ui.core.Tool(
-                        name=tool.name,
-                        description=tool.description or "",
-                        parameters=tool.parameters,
                     )
-                )
-                if (
-                    getattr(tool, "requires_confirmation", False)
-                    or getattr(tool, "requires_user_input", False)
-                ):
-                    hitl_detected = True
-            elif callable(tool):
-                fn = Function.from_callable(tool)
-                tool_items.append(
-                    ag_ui.core.Tool(
-                        name=fn.name,
-                        description=fn.description or "",
-                        parameters=fn.parameters,
-                    )
-                )
-
-        tools_capabilities = ag_ui.core.ToolsCapabilities(
-            supported=True,
-            items=tool_items if tool_items else None,
-            client_provided=True,
-        )
-
-        # --- output ---
-        structured_output: bool | None = None
-        if getattr(agent, "structured_outputs", False) is True:
-            structured_output = True
-        elif getattr(agent, "output_schema", None) is not None:
-            structured_output = True
-
-        output_capabilities: ag_ui.core.OutputCapabilities | None = None
-        if structured_output is not None:
-            output_capabilities = ag_ui.core.OutputCapabilities(structured_output=structured_output)
-
-        # --- reasoning ---
-        reasoning_supported: bool | None = None
-        reasoning_val = getattr(agent, "reasoning", None)
-        if reasoning_val is not None:
-            reasoning_supported = bool(reasoning_val)
-
-        reasoning_capabilities: ag_ui.core.ReasoningCapabilities | None = None
-        if reasoning_supported is not None:
-            reasoning_capabilities = ag_ui.core.ReasoningCapabilities(supported=reasoning_supported)
-
-        # --- multiAgent ---
-        multi_agent_capabilities: ag_ui.core.MultiAgentCapabilities | None = None
-        reasoning_agent = getattr(agent, "reasoning_agent", None)
-        if reasoning_agent is not None:
-            sub_agent_info = ag_ui.core.SubAgentInfo(
-                name=reasoning_agent.name,
-                description=getattr(reasoning_agent, "description", None),
-            )
-            multi_agent_capabilities = ag_ui.core.MultiAgentCapabilities(
-                supported=True,
-                sub_agents=[sub_agent_info],
-            )
-
-        # --- human_in_the_loop ---
-        human_in_the_loop: ag_ui.core.HumanInTheLoopCapabilities | None = None
-        if hitl_detected:
-            human_in_the_loop = ag_ui.core.HumanInTheLoopCapabilities(approvals=True)
+                    if fn.requires_confirmation or fn.requires_user_input:
+                        approvals = True
 
         return ag_ui.core.AgentCapabilities(
-            identity=ag_ui.core.IdentityCapabilities(**identity_kwargs),
+            identity=ag_ui.core.IdentityCapabilities(
+                name=agent.name,
+                description=agent.description,
+                metadata=agent.metadata,
+                type="agno",
+            ),
             transport=ag_ui.core.TransportCapabilities(streaming=True),
-            tools=tools_capabilities,
-            output=output_capabilities,
-            reasoning=reasoning_capabilities,
-            multi_agent=multi_agent_capabilities,
-            human_in_the_loop=human_in_the_loop,
+            tools=ag_ui.core.ToolsCapabilities(
+                supported=True,
+                items=tools,
+                client_provided=False,
+            ),
+            human_in_the_loop=ag_ui.core.HumanInTheLoopCapabilities(approvals=approvals)
+            if approvals is not None
+            else None,
+            output=ag_ui.core.OutputCapabilities(structured_output=structured_output)
+            if (structured_output := agent.structured_outputs is True or agent.output_schema is not None)
+            else None,
+            reasoning=ag_ui.core.ReasoningCapabilities(supported=agent.reasoning),
+            multi_agent=ag_ui.core.MultiAgentCapabilities(
+                supported=True,
+                sub_agents=[
+                    ag_ui.core.SubAgentInfo(
+                        name=agent.reasoning_agent.name,
+                        description=agent.reasoning_agent.description,
+                    )
+                ],
+            )
+            if agent.reasoning_agent is not None and agent.reasoning_agent.name is not None
+            else None,
         )
