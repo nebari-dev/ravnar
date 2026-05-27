@@ -1,4 +1,7 @@
 import contextlib
+import re
+import uuid
+from datetime import UTC, date, datetime, timedelta
 from typing import Annotated
 
 from fastapi import Depends
@@ -46,3 +49,43 @@ def make_app_client(config=None):
     with TestClient.from_config(config) as client:
         assert client.get("/health").is_success
         yield client
+
+
+class Sentinels:
+    def __init__(self):
+        self._uuids = 0
+        self._ids = 0
+        self._timestamps = 0
+
+    def new_uuid(self):
+        self._uuids += 1
+        return uuid.UUID(int=self._uuids)
+
+    @staticmethod
+    def is_uuid_sentinel(obj):
+        if not isinstance(obj, uuid.UUID):
+            return False
+
+        return int(obj) < 2**12
+
+    def new_id(self) -> str:
+        self._ids += 1
+        return f"sentinel:{self._ids}"
+
+    @staticmethod
+    def is_id_sentinel(obj):
+        if not isinstance(obj, str):
+            return False
+
+        return re.match(r"^sentinel:\d+$", obj) is not None
+
+    def new_datetime(self):
+        self._timestamps += 1
+        return datetime(1970, 1, 1, 0, 0, 0, tzinfo=UTC) + timedelta(seconds=self._timestamps)
+
+    @staticmethod
+    def is_datetime_sentinel(obj):
+        if not isinstance(obj, datetime):
+            return False
+
+        return obj.date() == date(1970, 1, 1)

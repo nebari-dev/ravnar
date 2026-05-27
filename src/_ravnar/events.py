@@ -99,9 +99,10 @@ class EventProcessor:
 
         tool_calls = {
             tc.id: orm.ToolCall(
+                uid=uuid.uuid4(),
                 id=tc.id,
-                assistant_message_id=message_uids[m.id],
-                tool_message_id=None,
+                assistant_message_uid=message_uids[m.id],
+                tool_message_uid=None,
                 name=tc.function.name,
                 arguments=tc.function.arguments,
                 encrypted_value=tc.encrypted_value,
@@ -143,7 +144,7 @@ class EventProcessor:
                     }
                 case ag_ui.core.ToolMessage():
                     tool_call = tool_calls[m.tool_call_id]
-                    tool_call.tool_message_id = message_uids[m.id]
+                    tool_call.tool_message_uid = message_uids[m.id]
                     data = {**m.model_dump(exclude={"tool_call_id"}), "tool_call": tool_call}
                 case _:
                     data = m.model_dump()
@@ -152,6 +153,8 @@ class EventProcessor:
             # setting the run ID to the current run here avoids the need to set it later in case the message is either
             # promoted to the current run because it was mutated or it is actually an input message of the current run
             data["run_id"] = self._run_agent_input.run_id
+            # ag_ui messages carry created_at as a millisecond timestamp; convert to datetime
+            data["created_at"] = parse_timestamp(data.get("created_at"))
             converted_messages[m.id] = cls(**data)
 
         return converted_messages
@@ -623,15 +626,24 @@ class EventProcessor:
             parent_msg = assistant_messages[parent_message_id]
             for tcd in tcds:
                 tool_call = orm.ToolCall(
+                    uid=uuid.uuid4(),
                     id=tcd.tool_call_id,
-                    assistant_message_id=parent_msg.uid,
-                    tool_message_id=None,
+                    assistant_message_uid=parent_msg.uid,
+                    tool_message_uid=None,
                     name=tcd.tool_call_name,
                     arguments="".join(tcd.arguments_delta),
                     encrypted_value=None,
                 )
                 tool_calls[tool_call.id] = tool_call
                 parent_msg.tool_calls.append(tool_call)
+
+        # Merge ToolCalls from converted input messages (e.g. client-supplied tool
+        # results referencing tool calls from a parent run). Streamed tool calls
+        # take precedence.
+        for msg in self._input_messages.values():
+            if isinstance(msg, orm.AssistantMessage):
+                for tc in msg.tool_calls:
+                    tool_calls.setdefault(tc.id, tc)
 
         messages: list[orm.Message] = [
             *(m for id, m in self._input_messages.items() if id in include_input_message_ids),
@@ -676,7 +688,7 @@ class EventProcessor:
                 continue
             msg_uid = uuid.uuid4()
             tool_call = tool_calls[trd.tool_call_id]
-            tool_call.tool_message_id = msg_uid
+            tool_call.tool_message_uid = msg_uid
             messages.append(
                 orm.ToolMessage(
                     uid=msg_uid,

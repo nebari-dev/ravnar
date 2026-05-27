@@ -185,7 +185,7 @@ class AssistantMessage(Message, kw_only=True, repr=False):
         "ToolCall",
         back_populates="assistant_message",
         cascade="all, delete-orphan",
-        foreign_keys="[ToolCall.assistant_message_id]",
+        foreign_keys="[ToolCall.assistant_message_uid]",
         lazy="selectin",
     )
 
@@ -212,12 +212,12 @@ class ToolMessage(Message, kw_only=True, repr=False):
         "ToolCall",
         back_populates="tool_message",
         uselist=False,
-        foreign_keys="[ToolCall.tool_message_id]",
+        foreign_keys="[ToolCall.tool_message_uid]",
         cascade="all, delete-orphan",
         lazy="selectin",
     )
-    error: Mapped[str | None]
-    encrypted_value: Mapped[str | None] = mapped_column(use_existing_column=True)
+    error: Mapped[str | None] = mapped_column(default=None)
+    encrypted_value: Mapped[str | None] = mapped_column(default=None, use_existing_column=True)
 
 
 class ActivityMessage(Message, kw_only=True, repr=False):
@@ -251,20 +251,22 @@ class InputContent(Base, kw_only=True, repr=False):
 class ToolCall(Base, kw_only=True, repr=False):
     __tablename__ = "tool_calls"
 
-    id: Mapped[str] = mapped_column(primary_key=True)
+    uid: Mapped[uuid.UUID] = mapped_column(types.Uuid, primary_key=True, default_factory=uuid.uuid4)
 
-    assistant_message_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("messages.uid", ondelete="CASCADE"), index=True)
+    id: Mapped[str] = mapped_column(index=True)
+
+    assistant_message_uid: Mapped[uuid.UUID] = mapped_column(ForeignKey("messages.uid", ondelete="CASCADE"), index=True)
     assistant_message: Mapped[AssistantMessage] = relationship(
-        init=False, back_populates="tool_calls", foreign_keys=[assistant_message_id]
+        init=False, back_populates="tool_calls", foreign_keys=[assistant_message_uid]
     )
 
-    tool_message_id: Mapped[uuid.UUID | None] = mapped_column(
+    tool_message_uid: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("messages.uid", ondelete="CASCADE"), index=True
     )
     tool_message: Mapped[ToolMessage | None] = relationship(
-        init=False, back_populates="tool_call", foreign_keys=[tool_message_id]
+        init=False, back_populates="tool_call", foreign_keys=[tool_message_uid]
     )
 
     name: Mapped[str]
     arguments: Mapped[str]
-    encrypted_value: Mapped[str | None]
+    encrypted_value: Mapped[str | None] = mapped_column(default=None)
