@@ -1,22 +1,18 @@
-"""Tests for automatic capability extraction from Pydantic AI and Agno agents."""
-
-from __future__ import annotations
-
 import ag_ui.core
 import agno.agent
+import agno.tools
 import compyre
 import pydantic
 import pydantic_ai
+import pydantic_ai.capabilities
+import pydantic_ai.models.test
 import pytest
-from agno.tools import Function, Toolkit
-from pydantic_ai.capabilities import HandleDeferredToolCalls, ImageGeneration, Thinking
-from pydantic_ai.models.test import TestModel
 
 from _ravnar.agents import AgnoAgentWrapper, PydanticAiAgentWrapper
 
 
 def make_pydantic_ai_agent(**kwargs):
-    return pydantic_ai.Agent(TestModel(), **kwargs)
+    return pydantic_ai.Agent(pydantic_ai.models.test.TestModel(), **kwargs)
 
 
 def make_agno_agent(**kwargs):
@@ -54,9 +50,6 @@ class TestPydanticAiAgentWrapper:
 
 
 class TestPydanticAiAgentWrapperCapabilityExtraction:
-    def _make_pydantic_ai_agent(self, **kwargs):
-        return pydantic_ai.Agent(TestModel(), **kwargs)
-
     async def test_minimal_agent(self):
         name = "test-agent"
 
@@ -108,14 +101,14 @@ class TestPydanticAiAgentWrapperCapabilityExtraction:
         assert "name" in tool.parameters["properties"]
 
     async def test_agent_with_thinking_capability(self):
-        agent = make_pydantic_ai_agent(capabilities=[Thinking()])
+        agent = make_pydantic_ai_agent(capabilities=[pydantic_ai.capabilities.Thinking()])
         capabilities = await PydanticAiAgentWrapper.extract_capabilities(agent)
 
         assert capabilities.reasoning is not None
         assert capabilities.reasoning.supported is True
 
     async def test_agent_with_image_generation_capability(self):
-        agent = make_pydantic_ai_agent(capabilities=[ImageGeneration()])
+        agent = make_pydantic_ai_agent(capabilities=[pydantic_ai.capabilities.ImageGeneration()])
         capabilities = await PydanticAiAgentWrapper.extract_capabilities(agent)
 
         assert capabilities.multimodal is not None
@@ -126,7 +119,9 @@ class TestPydanticAiAgentWrapperCapabilityExtraction:
         def dummy_handler(*args, **kwargs):
             return None
 
-        agent = make_pydantic_ai_agent(capabilities=[HandleDeferredToolCalls(handler=dummy_handler)])
+        agent = make_pydantic_ai_agent(
+            capabilities=[pydantic_ai.capabilities.HandleDeferredToolCalls(handler=dummy_handler)]
+        )
         capabilities = await PydanticAiAgentWrapper.extract_capabilities(agent)
 
         assert capabilities.human_in_the_loop is not None
@@ -134,7 +129,7 @@ class TestPydanticAiAgentWrapperCapabilityExtraction:
 
     async def test_agent_with_factory_capabilities_skipped(self):
         def thinking_factory(ctx):
-            return Thinking()
+            return pydantic_ai.capabilities.Thinking()
 
         agent = make_pydantic_ai_agent(capabilities=[thinking_factory])
         capabilities = await PydanticAiAgentWrapper.extract_capabilities(agent)
@@ -240,9 +235,9 @@ class TestAgnoAgentWrapperCapabilityExtraction:
             return a + b
 
         if tools_kwarg == "toolkit":
-            tools = [Toolkit(name="math", tools=[multiply])]
+            tools = [agno.tools.Toolkit(name="math", tools=[multiply])]
         elif tools_kwarg == "function":
-            tools = [Function.from_callable(subtract)]
+            tools = [agno.tools.Function.from_callable(subtract)]
         else:
             tools = [add]
 
@@ -308,7 +303,7 @@ class TestAgnoAgentWrapperCapabilityExtraction:
             """Perform a risky action."""
             return "done"
 
-        fn = Function.from_callable(risky_action)
+        fn = agno.tools.Function.from_callable(risky_action)
         setattr(fn, hitl_kwarg, True)
 
         agent = make_agno_agent(name="test-agent", tools=[fn])
