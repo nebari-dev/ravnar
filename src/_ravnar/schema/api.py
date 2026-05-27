@@ -55,6 +55,7 @@ class AgentInfo(BaseModel):
 
 
 class APIConfig(BaseModel):
+    storage_enabled: bool
     dynamic_agents_enabled: bool
 
 
