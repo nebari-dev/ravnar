@@ -44,11 +44,9 @@ def _make_dynamic_agents_router(
     )
 
     @router.post("", description=description)
-    async def register_agent(
-        data: schema.RegisterAgentData,
-    ) -> schema.AgentInfo:
+    async def register_agent(data: schema.RegisterAgentData) -> schema.AgentInfo:
         agent = data.agent()
-        agent_handler.add_agent(data.id, agent)
+        await agent_handler.add_agent(data.id, agent)
         return schema.AgentInfo(
             id=data.id,
             capabilities=agent.get_capabilities(),
@@ -56,7 +54,5 @@ def _make_dynamic_agents_router(
         )
 
     @router.delete("/{agentId}", description=description)
-    async def unregister_agent(
-        agent_id: Annotated[str, Path(alias="agentId")],
-    ) -> None:
-        agent_handler.remove_agent(agent_id)
+    async def unregister_agent(agent_id: Annotated[str, Path(alias="agentId")]) -> None:
+        await agent_handler.remove_agent(agent_id)
