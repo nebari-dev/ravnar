@@ -238,7 +238,9 @@ class ReasoningMessage(Message, kw_only=True, repr=False):
 class InputContent(Base, kw_only=True, repr=False):
     __tablename__ = "input_contents"
 
-    user_message_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("messages.uid", ondelete="CASCADE"), primary_key=True)
+    user_message_uid: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("messages.uid", ondelete="CASCADE"), primary_key=True
+    )
     user_message: Mapped[UserMessage] = relationship("UserMessage", init=False, back_populates="input_contents")
     index: Mapped[int] = mapped_column(primary_key=True)
 

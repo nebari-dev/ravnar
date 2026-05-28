@@ -134,7 +134,7 @@ class EventProcessor:
                             text = None
                             file_id = metadata.file_id
                         input_contents.append(
-                            orm.InputContent(user_message_id=message_uids[m.id], index=i, text=text, file_id=file_id)
+                            orm.InputContent(user_message_uid=message_uids[m.id], index=i, text=text, file_id=file_id)
                         )
                     data = {**m.model_dump(exclude={"content"}), "input_contents": input_contents}
                 case ag_ui.core.AssistantMessage():
