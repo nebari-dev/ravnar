@@ -25,7 +25,7 @@ class TestClient(_TestClient):
 
     @property
     def any_agent_id(self):
-        return next(iter(self.config.agents))
+        return next(iter(self.config.agents.static))
 
 
 class ForwardedUserAuthenticator(Authenticator):

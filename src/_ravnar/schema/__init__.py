@@ -1,7 +1,7 @@
 __all__ = [
     "APIConfig",
     "APIRouter",
-    "AgentConfig",
+    "AgentInfo",
     "AugmentedActivityMessage",
     "AugmentedAssistantMessage",
     "AugmentedDeveloperMessage",
@@ -18,6 +18,7 @@ __all__ = [
     "Page",
     "Pagination",
     "QuickPrompt",
+    "RegisterAgentData",
     "RenameThreadData",
     "Run",
     "TModel",
@@ -27,7 +28,7 @@ __all__ = [
 ]
 
 from .api import (
-    AgentConfig,
+    AgentInfo,
     APIConfig,
     AugmentedActivityMessage,
     AugmentedAssistantMessage,
@@ -42,6 +43,7 @@ from .api import (
     DeleteThreadsData,
     Event,
     QuickPrompt,
+    RegisterAgentData,
     RenameThreadData,
     Run,
     Thread,
