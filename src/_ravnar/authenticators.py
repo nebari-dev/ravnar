@@ -11,7 +11,7 @@ from fastapi.exceptions import HTTPException
 from fastapi.security import APIKeyHeader
 from opentelemetry import trace
 
-from _ravnar.auth import ALL_PERMISSIONS, User
+from _ravnar.auth import ALL_PERMISSIONS, Permission, User
 from _ravnar.observability import traced
 from _ravnar.utils import as_awaitable
 
@@ -97,6 +97,7 @@ class OIDCTokenValidator:
         algorithms: list[str] | None = None,
         audience: str | None = None,
         permissions_claim: str | None = None,
+        default_permissions: list[str] | None = None,
     ):
         import httpx
         import jwt.types
@@ -127,6 +128,12 @@ class OIDCTokenValidator:
         self._decode_kwargs = decode_kwargs
         self._permissions_claim = permissions_claim
 
+        if default_permissions is None:
+            default_permissions = []
+        else:
+            pydantic.TypeAdapter(list[Permission]).validate_python(default_permissions)
+        self._default_permissions = default_permissions
+
     @traced(name="OIDCTokenValidator")
     def __call__(self, token: str) -> User:
         try:
@@ -151,7 +158,6 @@ class OIDCTokenValidator:
         except pydantic.ValidationError as exc:
             raise HTTPException(detail="JWT payload invalid", status_code=status.HTTP_401_UNAUTHORIZED) from exc
 
-        permissions: list[str] = []
         if self._permissions_claim is not None:
             claim_value = payload.get(self._permissions_claim)
             if claim_value is None:
@@ -165,6 +171,8 @@ class OIDCTokenValidator:
                     detail="Permissions claim must be a list of strings",
                 )
             permissions = claim_value
+        else:
+            permissions = self._default_permissions
 
         return User(id=oidc_user.sub, permissions=permissions, data=oidc_user.model_dump(exclude={"sub"}))
 
