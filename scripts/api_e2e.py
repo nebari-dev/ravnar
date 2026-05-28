@@ -38,11 +38,11 @@ def main():
     user = assert_successful_response(client.get("/api/user")).json()
     print(json.dumps(user, indent=2))
 
-    header("info")
-    config = assert_successful_response(client.get("/api/config")).json()
-    print(json.dumps(config, indent=2))
+    header("agents")
+    agent_infos = assert_successful_response(client.get("/api/agents")).json()
+    print(json.dumps(agent_infos, indent=2))
 
-    agent_ids = [a["id"] for a in config["agents"]]
+    agent_ids = [a["id"] for a in agent_infos]
 
     header("new thread")
     thread = assert_successful_response(
@@ -155,12 +155,8 @@ def main():
     thread = assert_successful_response(client.get(f"/api/threads/{thread['id']}")).json()
     print(json.dumps(thread, indent=2))
 
-    header("list threads")
-    thread = assert_successful_response(client.get("/api/threads", params={"sortBy": "createdAt"})).json()
-    print(json.dumps(thread, indent=2))
-
     header("list messages")
-    messages = assert_successful_response(client.get("/api/threads/messages")).json()
+    messages = assert_successful_response(client.get(f"/api/threads/{thread['id']}/messages")).json()
     print(json.dumps(messages, indent=2))
 
 

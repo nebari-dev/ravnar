@@ -153,8 +153,6 @@ class EventProcessor:
             # setting the run ID to the current run here avoids the need to set it later in case the message is either
             # promoted to the current run because it was mutated or it is actually an input message of the current run
             data["run_id"] = self._run_agent_input.run_id
-            # ag_ui messages carry created_at as a millisecond timestamp; convert to datetime
-            data["created_at"] = parse_timestamp(data.get("created_at"))
             converted_messages[m.id] = cls(**data)
 
         return converted_messages
@@ -283,7 +281,6 @@ class EventProcessor:
                     if overridden
                     else {},
                 )
-                return self._trace_event(event)
             case ag_ui.core.TextMessageContentEvent():
                 tmd = self._text_message_data.get(event.message_id)
                 if tmd is None:

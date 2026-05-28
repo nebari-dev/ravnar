@@ -10,54 +10,9 @@ import compyre.utils
 import pydantic
 
 from _ravnar import orm, schema
-from _ravnar.events import parse_timestamp
+from _ravnar.events import parse_timestamp as parse_event_timestamp
+from _ravnar.utils import now
 from tests.utils import Sentinels
-
-
-def new_uid() -> uuid.UUID:
-    return uuid.uuid4()
-
-
-def new_id() -> str:
-    return str(uuid.uuid4())
-
-
-def new_timestamp():
-    return int(time.time_ns() / 1_000_000)
-
-
-def new_run_agent_input(
-    *,
-    thread_id: str | None = None,
-    run_id: str | None = None,
-    parent_run_id: str | None = None,
-    state: ag_ui.core.State = None,
-    messages: list[ag_ui.core.Message] | None = None,
-) -> ag_ui.core.RunAgentInput:
-    if thread_id is None:
-        thread_id = new_id()
-    if run_id is None:
-        run_id = new_id()
-    if messages is None:
-        messages = []
-    return ag_ui.core.RunAgentInput(
-        thread_id=thread_id,
-        run_id=run_id,
-        parent_run_id=parent_run_id,
-        state=state,
-        messages=messages,
-        tools=[],
-        context=[],
-        forwarded_props=None,
-    )
-
-
-class EventProcessingCase(schema.BaseModel):
-    run_agent_input: ag_ui.core.RunAgentInput
-    handle_run_lifecycle_events: bool = True
-    agent_event_stream: list[ag_ui.core.Event]
-    expected_event_stream: list[ag_ui.core.Event]
-    expected_run: orm.Run
 
 
 def _compute_excluded_sentinel_fields(p, /, *, fields_fn):
@@ -172,17 +127,44 @@ def orm_exclude_unpack_fn(
     )
 
 
+def new_uid() -> uuid.UUID:
+    return uuid.uuid4()
+
+
+def new_id() -> str:
+    return str(uuid.uuid4())
+
+
+def new_timestamp():
+    return now()
+
+
+def new_event_timestamp():
+    return int(time.time_ns() / 1_000_000)
+
+
+class EventProcessingCase(schema.BaseModel):
+    parent_state: orm.State = None
+    parent_messages: list[orm.Message] = pydantic.Field(default_factory=list)
+    thread_id: str = pydantic.Field(default_factory=new_id)
+    create_run_data: schema.CreateRunData
+    handle_run_lifecycle_events: bool = True
+    agent_event_stream: list[ag_ui.core.Event]
+    expected_event_stream: list[ag_ui.core.Event]
+    expected_run: orm.Run
+
+
 class EventProcessingCases:
     def case_thinking_to_reasoning_conversion(self, sentinels):
-        run_agent_input = new_run_agent_input()
+        create_run_data = schema.CreateRunData(messages=[])
 
         message_id = sentinels.new_id()
         deltas = ["thinking", "more"]
 
-        timestamp = new_timestamp()
+        timestamp = new_event_timestamp()
 
         return EventProcessingCase(
-            run_agent_input=run_agent_input,
+            create_run_data=create_run_data,
             agent_event_stream=[
                 ag_ui.core.ThinkingStartEvent(),
                 ag_ui.core.ThinkingTextMessageStartEvent(timestamp=timestamp),
@@ -198,16 +180,16 @@ class EventProcessingCases:
                 ag_ui.core.ReasoningEndEvent(message_id=message_id),
             ],
             expected_run=orm.Run(
-                id=run_agent_input.run_id,
-                thread_id=run_agent_input.thread_id,
-                parent_run_id=run_agent_input.parent_run_id,
+                id=create_run_data.id,
+                thread_id=sentinels.new_id(),
+                parent_run_id=create_run_data.parent_run_id,
                 created_at=sentinels.new_datetime(),
                 messages=[
                     orm.ReasoningMessage(
                         uid=sentinels.new_uuid(),
-                        run_id=run_agent_input.run_id,
+                        run_id=create_run_data.id,
                         id=message_id,
-                        created_at=parse_timestamp(timestamp),
+                        created_at=parse_event_timestamp(timestamp),
                         content="".join(deltas),
                     )
                 ],
@@ -215,13 +197,13 @@ class EventProcessingCases:
         )
 
     def case_activity_message_delta(self, sentinels):
-        run_agent_input = new_run_agent_input()
+        create_run_data = schema.CreateRunData(messages=[])
 
         message_id = new_id()
         activity_type = "foo"
 
-        snapshot_timestamp = new_timestamp()
-        last_patch_timestamp = new_timestamp()
+        snapshot_timestamp = new_event_timestamp()
+        last_patch_timestamp = new_event_timestamp()
 
         event_stream = [
             ag_ui.core.ActivitySnapshotEvent(
@@ -247,20 +229,20 @@ class EventProcessingCases:
         ]
 
         return EventProcessingCase(
-            run_agent_input=run_agent_input,
+            create_run_data=create_run_data,
             agent_event_stream=event_stream,
             expected_event_stream=event_stream,
             expected_run=orm.Run(
-                id=run_agent_input.run_id,
-                thread_id=run_agent_input.thread_id,
-                parent_run_id=run_agent_input.parent_run_id,
+                id=create_run_data.id,
+                thread_id=sentinels.new_id(),
+                parent_run_id=create_run_data.parent_run_id,
                 created_at=sentinels.new_datetime(),
                 messages=[
                     orm.ActivityMessage(
                         uid=sentinels.new_uuid(),
-                        run_id=run_agent_input.run_id,
+                        run_id=create_run_data.id,
                         id=message_id,
-                        created_at=parse_timestamp(snapshot_timestamp),
+                        created_at=parse_event_timestamp(snapshot_timestamp),
                         content={"baz": "boo", "hello": ["world"]},
                         activity_type=activity_type,
                     )
@@ -269,14 +251,14 @@ class EventProcessingCases:
         )
 
     def case_activity_message_snapshot(self, sentinels):
-        run_agent_input = new_run_agent_input()
+        create_run_data = schema.CreateRunData(messages=[])
 
         message_id = new_id()
         activity_type = "foo"
         first_content = {"baz": "qux", "foo": "bar"}
         second_content = {"replaced": True}
-        first_timestamp = new_timestamp()
-        second_timestamp = new_timestamp()
+        first_timestamp = new_event_timestamp()
+        second_timestamp = new_event_timestamp()
 
         event_stream = [
             ag_ui.core.ActivitySnapshotEvent(
@@ -295,20 +277,20 @@ class EventProcessingCases:
         ]
 
         return EventProcessingCase(
-            run_agent_input=run_agent_input,
+            create_run_data=create_run_data,
             agent_event_stream=event_stream,
             expected_event_stream=event_stream,
             expected_run=orm.Run(
-                id=run_agent_input.run_id,
-                thread_id=run_agent_input.thread_id,
-                parent_run_id=run_agent_input.parent_run_id,
+                id=create_run_data.id,
+                thread_id=sentinels.new_id(),
+                parent_run_id=create_run_data.parent_run_id,
                 created_at=sentinels.new_datetime(),
                 messages=[
                     orm.ActivityMessage(
                         uid=sentinels.new_uuid(),
-                        run_id=run_agent_input.run_id,
+                        run_id=create_run_data.id,
                         id=message_id,
-                        created_at=parse_timestamp(second_timestamp),
+                        created_at=parse_event_timestamp(second_timestamp),
                         content=second_content,
                         activity_type=activity_type,
                     )
@@ -317,11 +299,11 @@ class EventProcessingCases:
         )
 
     def case_text_message(self, sentinels):
-        run_agent_input = new_run_agent_input()
+        create_run_data = schema.CreateRunData(messages=[])
 
         message_id = new_id()
         deltas = ["Hello, ", "world!"]
-        timestamp = new_timestamp()
+        timestamp = new_event_timestamp()
 
         event_stream = [
             ag_ui.core.TextMessageStartEvent(message_id=message_id, timestamp=timestamp),
@@ -330,20 +312,20 @@ class EventProcessingCases:
         ]
 
         return EventProcessingCase(
-            run_agent_input=run_agent_input,
+            create_run_data=create_run_data,
             agent_event_stream=event_stream,
             expected_event_stream=event_stream,
             expected_run=orm.Run(
-                id=run_agent_input.run_id,
-                thread_id=run_agent_input.thread_id,
-                parent_run_id=run_agent_input.parent_run_id,
+                id=create_run_data.id,
+                thread_id=sentinels.new_id(),
+                parent_run_id=create_run_data.parent_run_id,
                 created_at=sentinels.new_datetime(),
                 messages=[
                     orm.AssistantMessage(
                         uid=sentinels.new_uuid(),
-                        run_id=run_agent_input.run_id,
+                        run_id=create_run_data.id,
                         id=message_id,
-                        created_at=parse_timestamp(timestamp),
+                        created_at=parse_event_timestamp(timestamp),
                         content="".join(deltas),
                         tool_calls=[],
                     )
@@ -352,21 +334,22 @@ class EventProcessingCases:
         )
 
     def case_state_snapshot(self, sentinels):
+        create_run_data = schema.CreateRunData(messages=[])
+
         state = {"baz": "qux", "foo": "bar"}
         snapshot = {"baz": "boo", "hello": ["world"]}
-
-        run_agent_input = new_run_agent_input(state=state)
 
         event_stream = [ag_ui.core.StateSnapshotEvent(snapshot=snapshot)]
 
         return EventProcessingCase(
-            run_agent_input=run_agent_input,
+            parent_state=state,
+            create_run_data=create_run_data,
             agent_event_stream=event_stream,
             expected_event_stream=event_stream,
             expected_run=orm.Run(
-                id=run_agent_input.run_id,
-                thread_id=run_agent_input.thread_id,
-                parent_run_id=run_agent_input.parent_run_id,
+                id=create_run_data.id,
+                thread_id=sentinels.new_id(),
+                parent_run_id=create_run_data.parent_run_id,
                 created_at=sentinels.new_datetime(),
                 messages=[],
                 state=snapshot,
@@ -374,9 +357,9 @@ class EventProcessingCases:
         )
 
     def case_state_delta(self, sentinels):
-        state = {"baz": "qux", "foo": "bar"}
+        create_run_data = schema.CreateRunData(messages=[])
 
-        run_agent_input = new_run_agent_input(state=state)
+        state = {"baz": "qux", "foo": "bar"}
 
         event_stream = [
             ag_ui.core.StateDeltaEvent(
@@ -389,13 +372,14 @@ class EventProcessingCases:
         ]
 
         return EventProcessingCase(
-            run_agent_input=run_agent_input,
+            parent_state=state,
+            create_run_data=create_run_data,
             agent_event_stream=event_stream,
             expected_event_stream=event_stream,
             expected_run=orm.Run(
-                id=run_agent_input.run_id,
-                thread_id=run_agent_input.thread_id,
-                parent_run_id=run_agent_input.parent_run_id,
+                id=create_run_data.id,
+                thread_id=sentinels.new_id(),
+                parent_run_id=create_run_data.parent_run_id,
                 created_at=sentinels.new_datetime(),
                 messages=[],
                 state={"baz": "boo", "hello": ["world"]},
@@ -403,7 +387,7 @@ class EventProcessingCases:
         )
 
     def case_tool_call_explicit_parent(self, sentinels):
-        run_agent_input = new_run_agent_input()
+        create_run_data = schema.CreateRunData(messages=[])
 
         parent_message_id = new_id()
         tool_call_id = new_id()
@@ -411,7 +395,7 @@ class EventProcessingCases:
         args_deltas = ['{"arg": ', '"value"}']
         result_message_id = new_id()
         result_content = "result"
-        timestamp = new_timestamp()
+        timestamp = new_event_timestamp()
 
         event_stream = [
             ag_ui.core.TextMessageStartEvent(message_id=parent_message_id, timestamp=timestamp),
@@ -444,29 +428,29 @@ class EventProcessingCases:
         )
 
         return EventProcessingCase(
-            run_agent_input=run_agent_input,
+            create_run_data=create_run_data,
             agent_event_stream=event_stream,
             expected_event_stream=event_stream,
             expected_run=orm.Run(
-                id=run_agent_input.run_id,
-                thread_id=run_agent_input.thread_id,
-                parent_run_id=run_agent_input.parent_run_id,
+                id=create_run_data.id,
+                thread_id=sentinels.new_id(),
+                parent_run_id=create_run_data.parent_run_id,
                 created_at=sentinels.new_datetime(),
                 messages=[
                     orm.AssistantMessage(
                         uid=assistant_message_uid,
-                        run_id=run_agent_input.run_id,
+                        run_id=create_run_data.id,
                         id=parent_message_id,
-                        created_at=parse_timestamp(timestamp),
+                        created_at=parse_event_timestamp(timestamp),
                         content=None,
                         tool_calls=[tool_call],
                     ),
                     orm.ToolMessage(
                         uid=tool_message_uid,
-                        run_id=run_agent_input.run_id,
+                        run_id=create_run_data.id,
                         id=result_message_id,
                         content=result_content,
-                        created_at=parse_timestamp(timestamp),
+                        created_at=parse_event_timestamp(timestamp),
                         tool_call=tool_call,
                     ),
                 ],
@@ -474,14 +458,14 @@ class EventProcessingCases:
         )
 
     def case_tool_call_implicit_parent(self, sentinels):
-        run_agent_input = new_run_agent_input()
+        create_run_data = schema.CreateRunData(messages=[])
 
         tool_call_id = new_id()
         tool_call_name = "test_tool"
         args_deltas = ['{"arg": ', '"value"}']
         result_message_id = new_id()
         result_content = "result"
-        timestamp = new_timestamp()
+        timestamp = new_event_timestamp()
 
         event_stream = [
             ag_ui.core.ToolCallStartEvent(
@@ -512,29 +496,29 @@ class EventProcessingCases:
         )
 
         return EventProcessingCase(
-            run_agent_input=run_agent_input,
+            create_run_data=create_run_data,
             agent_event_stream=event_stream,
             expected_event_stream=event_stream,
             expected_run=orm.Run(
-                id=run_agent_input.run_id,
-                thread_id=run_agent_input.thread_id,
-                parent_run_id=run_agent_input.parent_run_id,
+                id=create_run_data.id,
+                thread_id=sentinels.new_id(),
+                parent_run_id=create_run_data.parent_run_id,
                 created_at=sentinels.new_datetime(),
                 messages=[
                     orm.AssistantMessage(
                         uid=assistant_message_uid,
-                        run_id=run_agent_input.run_id,
+                        run_id=create_run_data.id,
                         id=sentinels.new_id(),
-                        created_at=parse_timestamp(timestamp),
+                        created_at=parse_event_timestamp(timestamp),
                         content=None,
                         tool_calls=[tool_call],
                     ),
                     orm.ToolMessage(
                         uid=tool_message_uid,
-                        run_id=run_agent_input.run_id,
+                        run_id=create_run_data.id,
                         id=result_message_id,
                         content=result_content,
-                        created_at=parse_timestamp(timestamp),
+                        created_at=parse_event_timestamp(timestamp),
                         tool_call=tool_call,
                     ),
                 ],
@@ -542,11 +526,11 @@ class EventProcessingCases:
         )
 
     def case_reasoning_message(self, sentinels):
-        run_agent_input = new_run_agent_input()
+        create_run_data = schema.CreateRunData(messages=[])
 
         message_id = new_id()
         deltas = ["reasoning ", "step"]
-        timestamp = new_timestamp()
+        timestamp = new_event_timestamp()
 
         event_stream = [
             ag_ui.core.ReasoningStartEvent(message_id=message_id),
@@ -557,20 +541,20 @@ class EventProcessingCases:
         ]
 
         return EventProcessingCase(
-            run_agent_input=run_agent_input,
+            create_run_data=create_run_data,
             agent_event_stream=event_stream,
             expected_event_stream=event_stream,
             expected_run=orm.Run(
-                id=run_agent_input.run_id,
-                thread_id=run_agent_input.thread_id,
-                parent_run_id=run_agent_input.parent_run_id,
+                id=create_run_data.id,
+                thread_id=sentinels.new_id(),
+                parent_run_id=create_run_data.parent_run_id,
                 created_at=sentinels.new_datetime(),
                 messages=[
                     orm.ReasoningMessage(
                         uid=sentinels.new_uuid(),
-                        run_id=run_agent_input.run_id,
+                        run_id=create_run_data.id,
                         id=message_id,
-                        created_at=parse_timestamp(timestamp),
+                        created_at=parse_event_timestamp(timestamp),
                         content="".join(deltas),
                     )
                 ],
@@ -578,7 +562,7 @@ class EventProcessingCases:
         )
 
     def case_run_error(self, sentinels):
-        run_agent_input = new_run_agent_input()
+        create_run_data = schema.CreateRunData(messages=[])
 
         error_message = "something went wrong"
         error_code = "test:error"
@@ -588,20 +572,20 @@ class EventProcessingCases:
         ]
 
         return EventProcessingCase(
-            run_agent_input=run_agent_input,
+            create_run_data=create_run_data,
             agent_event_stream=event_stream,
             expected_event_stream=event_stream,
             expected_run=orm.Run(
-                id=run_agent_input.run_id,
-                thread_id=run_agent_input.thread_id,
-                parent_run_id=run_agent_input.parent_run_id,
+                id=create_run_data.id,
+                thread_id=sentinels.new_id(),
+                parent_run_id=create_run_data.parent_run_id,
                 created_at=sentinels.new_datetime(),
                 messages=[],
             ),
         )
 
     def case_custom_event_passthrough(self, sentinels):
-        run_agent_input = new_run_agent_input()
+        create_run_data = schema.CreateRunData(messages=[])
 
         custom_name = "test"
         custom_value = {"foo": "bar"}
@@ -611,13 +595,13 @@ class EventProcessingCases:
         ]
 
         return EventProcessingCase(
-            run_agent_input=run_agent_input,
+            create_run_data=create_run_data,
             agent_event_stream=event_stream,
             expected_event_stream=event_stream,
             expected_run=orm.Run(
-                id=run_agent_input.run_id,
-                thread_id=run_agent_input.thread_id,
-                parent_run_id=run_agent_input.parent_run_id,
+                id=create_run_data.id,
+                thread_id=sentinels.new_id(),
+                parent_run_id=create_run_data.parent_run_id,
                 created_at=sentinels.new_datetime(),
                 messages=[],
             ),
@@ -625,78 +609,89 @@ class EventProcessingCases:
 
     def case_frontend_tool_call(self, sentinels):
         assistant_message_id = new_id()
+        assistant_message_timestamp = new_timestamp()
+
         tool_call_id = new_id()
         tool_call_name = "fetch_weather"
         tool_call_args = json.dumps({"city": "Reykjavik"})
-        result_message_id = new_id()
-        result_content = json.dumps({"temp": 2, "unit": "C"})
-        assistant_timestamp = new_timestamp()
-        result_timestamp = new_timestamp()
 
-        run_agent_input = new_run_agent_input(
+        tool_message_id = new_id()
+        tool_message_content = json.dumps({"temp": 2, "unit": "C"})
+        tool_message_timestamp = new_timestamp()
+
+        parent_messages = [
+            orm.AssistantMessage(
+                id=assistant_message_id,
+                run_id=new_id(),
+                created_at=assistant_message_timestamp,
+                content=None,
+                tool_calls=[
+                    orm.ToolCall(
+                        uid=new_uid(),
+                        id=tool_call_id,
+                        name=tool_call_name,
+                        arguments=tool_call_args,
+                        assistant_message_uid=new_uid(),
+                        tool_message_uid=None,
+                    )
+                ],
+            )
+        ]
+
+        create_run_data = schema.CreateRunData(
             messages=[
-                ag_ui.core.AssistantMessage(
-                    id=assistant_message_id,
-                    content=None,
-                    tool_calls=[
-                        ag_ui.core.ToolCall(
-                            id=tool_call_id,
-                            function=ag_ui.core.FunctionCall(
-                                name=tool_call_name,
-                                arguments=tool_call_args,
-                            ),
-                        ),
-                    ],
-                ),
+                schema.AugmentedToolMessage(
+                    id=tool_message_id,
+                    content=tool_message_content,
+                    tool_call_id=tool_call_id,
+                    created_at=tool_message_timestamp,
+                )
             ]
         )
 
-        event_stream = [
-            ag_ui.core.ToolCallResultEvent(
-                message_id=result_message_id,
-                tool_call_id=tool_call_id,
-                content=result_content,
-                timestamp=result_timestamp,
-            ),
-        ]
+        event_stream = []
 
-        assistant_message_uid = sentinels.new_uuid()
-        tool_message_uid = sentinels.new_uuid()
-        tool_call = orm.ToolCall(
-            uid=assistant_message_uid,
+        expected_assistant_message_uid = sentinels.new_uuid()
+        expected_tool_message_uid = sentinels.new_uuid()
+
+        expected_tool_call = orm.ToolCall(
+            uid=sentinels.new_uuid(),
             id=tool_call_id,
             name=tool_call_name,
             arguments=tool_call_args,
-            assistant_message_uid=assistant_message_uid,
-            tool_message_uid=tool_message_uid,
+            assistant_message_uid=expected_assistant_message_uid,
+            tool_message_uid=expected_tool_message_uid,
+        )
+        expected_assistant_message = orm.AssistantMessage(
+            uid=expected_assistant_message_uid,
+            run_id=create_run_data.id,
+            id=assistant_message_id,
+            created_at=assistant_message_timestamp,
+            content=None,
+            tool_calls=[],
+        )
+        expected_tool_message = orm.ToolMessage(
+            uid=expected_tool_message_uid,
+            run_id=create_run_data.id,
+            id=tool_message_id,
+            content=tool_message_content,
+            created_at=tool_message_timestamp,
+            tool_call=expected_tool_call,
         )
 
+        expected_tool_call.assistant_message = expected_assistant_message
+        expected_tool_call.tool_message = expected_tool_message
+
         return EventProcessingCase(
-            run_agent_input=run_agent_input,
+            parent_messages=parent_messages,
+            create_run_data=create_run_data,
             agent_event_stream=event_stream,
             expected_event_stream=event_stream,
             expected_run=orm.Run(
-                id=run_agent_input.run_id,
-                thread_id=run_agent_input.thread_id,
-                parent_run_id=run_agent_input.parent_run_id,
+                id=create_run_data.id,
+                thread_id=sentinels.new_id(),
+                parent_run_id=create_run_data.parent_run_id,
                 created_at=sentinels.new_datetime(),
-                messages=[
-                    orm.ToolMessage(
-                        uid=tool_message_uid,
-                        run_id=run_agent_input.run_id,
-                        id=result_message_id,
-                        content=result_content,
-                        created_at=parse_timestamp(result_timestamp),
-                        tool_call=tool_call,
-                    ),
-                    orm.AssistantMessage(
-                        uid=assistant_message_uid,
-                        run_id=run_agent_input.run_id,
-                        id=sentinels.new_id(),
-                        created_at=parse_timestamp(assistant_timestamp),
-                        content=None,
-                        tool_calls=[tool_call],
-                    ),
-                ],
+                messages=[expected_tool_message],
             ),
         )
