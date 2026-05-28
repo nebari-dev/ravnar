@@ -184,13 +184,7 @@ class AgentHandler(SetupTeardownMixin):
     ) -> fastsse.Response:
         agent = self._get_agent(agent_id)
 
-        event_processor = EventProcessor(
-            thread_id=run_agent_input.thread_id,
-            run_id=run_agent_input.run_id,
-            parent_run_id=run_agent_input.parent_run_id,
-            state=run_agent_input.state,
-            messages=run_agent_input.messages,
-        )
+        event_processor = EventProcessor(run_agent_input=run_agent_input)
 
         span = tracer.start_span("AgentHandler.run")
         span.set_attribute("agent_id", agent_id)

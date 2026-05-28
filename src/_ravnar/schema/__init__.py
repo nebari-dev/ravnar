@@ -20,6 +20,7 @@ __all__ = [
     "QuickPrompt",
     "RegisterAgentData",
     "RenameThreadData",
+    "Run",
     "TModel",
     "Thread",
     "User",
@@ -44,6 +45,7 @@ from .api import (
     QuickPrompt,
     RegisterAgentData,
     RenameThreadData,
+    Run,
     Thread,
 )
 from .misc import APIRouter, BaseModel, Page, Pagination, TModel, User, create_str_literal

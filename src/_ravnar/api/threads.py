@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import base64
-import uuid
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Annotated, Any
 
 import ag_ui.core
-import ag_ui.encoder
 import fastsse
 import pydantic
 from fastapi import Depends, HTTPException, Path, Query, status
@@ -15,7 +13,7 @@ from opentelemetry import trace
 from _ravnar import schema
 from _ravnar.file_storage import FileHandler, WrappedMetadata
 from _ravnar.observability import traced
-from _ravnar.utils import as_awaitable, now
+from _ravnar.utils import as_awaitable
 
 tracer = trace.get_tracer(__name__)
 
@@ -26,8 +24,10 @@ if TYPE_CHECKING:
     from . import AgentHandler
 
     ThreadsSortBy = str
+    RunsSortBy = str
 else:
-    ThreadsSortBy = schema.create_str_literal("created_at", "updated_at", default="created_at")
+    ThreadsSortBy = schema.create_str_literal("created_at", default="created_at")
+    RunsSortBy = schema.create_str_literal("created_at", default="created_at")
 
 
 def make_router(
@@ -70,46 +70,76 @@ def make_router(
 
     @router.get("/{threadId}/messages")
     async def get_thread_messages(
-        id: Annotated[str, Path(alias="threadId")],
+        thread_id: Annotated[str, Path(alias="threadId")],
         user: schema.User = Depends(authenticated_user),  # noqa: B008
     ) -> list[schema.AugmentedMessage]:
-        thread = await database.get_thread(user_id=user.id, id=id, with_messages=True)
-        return pydantic.TypeAdapter(list[schema.AugmentedMessage]).validate_python(
-            thread.messages, from_attributes=True
+        _, _, messages = await database.get_thread_history(user_id=user.id, thread_id=thread_id, run_id=None)
+        return pydantic.TypeAdapter(list[schema.AugmentedMessage]).validate_python(messages, from_attributes=True)
+
+    @router.get("/{threadId}/runs")
+    async def get_runs(
+        *,
+        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        thread_id: Annotated[str, Path(alias="threadId")],
+        pagination: Annotated[schema.Pagination[RunsSortBy], Query()],
+    ) -> schema.Page[schema.Run]:
+        return schema.Page[schema.Run].model_validate(
+            await database.get_runs(user_id=user.id, thread_id=thread_id, pagination=pagination),
+            from_attributes=True,
         )
 
-    @router.sse("/{threadId}/run", methods=["POST"], response_model=schema.Event, tags=["Runs"])
+    @router.get("/{threadId}/runs/{runId}")
+    async def get_run(
+        *,
+        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        thread_id: Annotated[str, Path(alias="threadId")],
+        run_id: Annotated[str, Path(alias="runId")],
+    ) -> schema.Run:
+        return schema.Run.model_validate(await database.get_run(id=run_id, user_id=user.id), from_attributes=True)
+
+    @router.get("/{threadId}/runs/{runId}/messages")
+    async def get_run_messages(
+        *,
+        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        thread_id: Annotated[str, Path(alias="threadId")],
+        run_id: Annotated[str, Path(alias="runId")],
+    ) -> list[schema.AugmentedMessage]:
+        _, _, messages = await database.get_thread_history(user_id=user.id, thread_id=thread_id, run_id=run_id)
+        return pydantic.TypeAdapter(list[schema.AugmentedMessage]).validate_python(messages, from_attributes=True)
+
+    @router.sse("/{threadId}/runs", methods=["POST"], response_model=schema.Event, tags=["Runs"])
     async def create_run(
         *,
         user: schema.User = Depends(authenticated_user),  # noqa: B008
         thread_id: Annotated[str, Path(alias="threadId")],
         data: schema.CreateRunData,
     ) -> fastsse.Response:
-        thread = await database.get_thread(user_id=user.id, id=thread_id, with_messages=True)
-
-        messages = pydantic.TypeAdapter(list[schema.AugmentedMessage]).validate_python(
-            thread.messages, from_attributes=True
+        thread, parent_run, parent_messages = await database.get_thread_history(
+            user_id=user.id, thread_id=thread_id, run_id=data.parent_run_id
         )
-        messages.extend(data.messages)
 
-        await hydrate_files(messages, user=user, file_handler=file_handler)
+        augmented_messages_ta = pydantic.TypeAdapter(list[schema.AugmentedMessage])
+        augmented_messages = augmented_messages_ta.validate_python(parent_messages, from_attributes=True)
+        augmented_messages.extend(data.messages)
+
+        await hydrate_files(augmented_messages, user=user, file_handler=file_handler)
 
         run_agent_input = ag_ui.core.RunAgentInput(
-            thread_id=thread.id,
-            run_id=str(uuid.uuid4()),
-            parent_run_id=None,
-            state=thread.state,
-            messages=[pydantic.TypeAdapter(ag_ui.core.Message).validate_python(m.model_dump()) for m in messages],
+            thread_id=thread_id,
+            run_id=data.id,
+            parent_run_id=parent_run.id if parent_run is not None else None,
+            state=parent_run.state if parent_run is not None else None,
+            messages=pydantic.TypeAdapter(list[ag_ui.core.Message]).validate_python(
+                augmented_messages_ta.dump_python(augmented_messages)
+            ),
             tools=data.tools,
             context=data.context,
             forwarded_props=data.forwarded_props,
         )
 
         async def callback(event_processor: EventProcessor) -> None:
-            with tracer.start_as_current_span("persist_run"):
-                thread.state, thread.messages = event_processor.extract()
-                thread.updated_at = now()
-                await database.update_thread(thread)
+            run = event_processor.extract(include_input_message_ids={m.id for m in data.messages})
+            await database.create_run(run)
 
         return await agent_handler.run(thread.agent_id, run_agent_input, callback=callback)
 

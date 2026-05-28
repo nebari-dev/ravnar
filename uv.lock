@@ -320,14 +320,14 @@ wheels = [
 
 [[package]]
 name = "compyre"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "packaging" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c8/2e/0536b1af6d921e4b5dc2f60d29e9dcf52f9d79654b724f435e1fc14119ee/compyre-0.2.0.tar.gz", hash = "sha256:df03c613db5334bf3cdca56a9b448c9530f4c4e195bf38ec1662f6cf5d577440", size = 263758, upload-time = "2026-04-01T12:54:02.411Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0d/ec/88b493a68d9f04b8afb9e506ccfc904c9a1e46f643651489f073f84d262c/compyre-0.3.0.tar.gz", hash = "sha256:2065e8f525c529c7b33bab1f1c525cc17f18c6cbf08914986893816ced05dc0d", size = 300499, upload-time = "2026-05-20T13:51:22.995Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/62/e6/1589dc451269464b6434ada62b70cf23ecc69689388023029d4bce956f87/compyre-0.2.0-py3-none-any.whl", hash = "sha256:1110597f9e992693a7cdcfb1fb70a60b4ec1867060f820b5d1d8c22cd0ecf9b2", size = 16971, upload-time = "2026-04-01T12:54:01.162Z" },
+    { url = "https://files.pythonhosted.org/packages/3b/8c/f026d24c967a261eb0be095170c782d62248b9d87ebb299457dbc388b4d2/compyre-0.3.0-py3-none-any.whl", hash = "sha256:9d11b48f1c38570ba05f6f76a91b4022d9dd654f063e979711d55dc8b4974c09", size = 17045, upload-time = "2026-05-20T13:51:21.834Z" },
 ]
 
 [[package]]

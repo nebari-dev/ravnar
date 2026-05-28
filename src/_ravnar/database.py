@@ -9,11 +9,11 @@ from typing import Any, cast
 
 from fastapi import HTTPException, status
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
-from sqlalchemy import Engine, Select, asc, create_engine, desc, func, inspect, select
+from sqlalchemy import Engine, Select, asc, create_engine, desc, func, inspect, literal_column, select
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.exc import InvalidRequestError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import Session, selectinload, sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.orm.interfaces import ORMOption
 from starlette.concurrency import run_in_threadpool
 from typing_extensions import TypedDict
@@ -166,16 +166,13 @@ class Database(SetupTeardownMixin):
             if thread is not None:
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Thread exists")
 
-            created_at = updated_at = now()
             thread = orm.Thread(
                 id=id,
                 user_id=user_id,
                 agent_id=agent_id,
                 name=name,
-                created_at=created_at,
-                updated_at=updated_at,
-                state=None,
-                messages=[],
+                created_at=now(),
+                runs=[],
             )
             session.add(thread)
             return thread
@@ -202,10 +199,8 @@ class Database(SetupTeardownMixin):
         async with self._get_session() as session:
             return await self._get_threads(session, user_id=user_id, pagination=pagination)
 
-    async def _get_thread(self, session: AsyncSession, *, user_id: str, id: str, with_messages: bool) -> orm.Thread:
+    async def _get_thread(self, session: AsyncSession, *, user_id: str, id: str) -> orm.Thread:
         query = select(orm.Thread).where((orm.Thread.id == id) & (orm.Thread.user_id == user_id))
-        if with_messages:
-            query = query.options(selectinload(orm.Thread.messages))
         result = await session.execute(query)
         thread = result.scalar_one_or_none()
         if thread is None:
@@ -213,27 +208,117 @@ class Database(SetupTeardownMixin):
         return thread
 
     @traced
-    async def get_thread(self, *, user_id: str, id: str, with_messages: bool = False) -> orm.Thread:
+    async def get_thread(self, *, user_id: str, id: str) -> orm.Thread:
         async with self._get_session() as session:
-            return await self._get_thread(session, user_id=user_id, id=id, with_messages=with_messages)
-
-    @traced
-    async def append_messages_to_thread(self, *, user_id: str, id: str, messages: list[orm.Message]) -> None:
-        async with self._get_session() as session:
-            thread = await self._get_thread(session, user_id=user_id, id=id, with_messages=False)
-            thread.messages.extend(messages)
+            return await self._get_thread(session, user_id=user_id, id=id)
 
     @traced
     async def rename_thread(self, *, user_id: str, id: str, name: str) -> orm.Thread:
         async with self._get_session() as session:
-            thread = await self._get_thread(session, user_id=user_id, id=id, with_messages=False)
+            thread = await self._get_thread(session, user_id=user_id, id=id)
             thread.name = name
             return thread
 
     @traced
-    async def update_thread(self, thread: orm.Thread) -> None:
+    async def create_run(self, run: orm.Run) -> None:
         async with self._get_session() as session:
-            await session.merge(thread)
+            session.add(run)
+
+    async def _get_run(self, session: AsyncSession, *, id: str, user_id: str) -> orm.Run:
+        query = (
+            select(orm.Run)
+            .join(orm.Thread, orm.Run.thread_id == orm.Thread.id)
+            .where((orm.Run.id == id) & (orm.Thread.user_id == user_id))
+        )
+        result = await session.execute(query)
+        run = result.scalar_one_or_none()
+        if run is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+        return run
+
+    @traced
+    async def get_run(self, *, id: str, user_id: str) -> orm.Run:
+        async with self._get_session() as session:
+            return await self._get_run(session, id=id, user_id=user_id)
+
+    @traced
+    async def get_runs(
+        self,
+        *,
+        user_id: str,
+        thread_id: str,
+        pagination: schema.Pagination | None = None,
+    ) -> orm.Page[orm.Run]:
+        async with self._get_session() as session:
+
+            def select_qualifier(query: Select) -> Select:
+                return query.join(orm.Thread, orm.Run.thread_id == orm.Thread.id).where(
+                    (orm.Run.thread_id == thread_id) & (orm.Thread.user_id == user_id)
+                )
+
+            return await self._get_page(
+                session, orm_type=orm.Run, select_qualifier=select_qualifier, pagination=pagination
+            )
+
+    async def _get_thread_messages(self, session: AsyncSession, *, run_id: str) -> list[orm.Message]:
+        run_chain = (
+            select(
+                orm.Run.id.label("run_id"),
+                orm.Run.parent_run_id.label("parent_run_id"),
+                literal_column("0").label("depth"),
+            )
+            .where(orm.Run.id == run_id)
+            .cte(name="run_chain", recursive=True)
+        )
+        run_chain = run_chain.union_all(
+            select(orm.Run.id, orm.Run.parent_run_id, (run_chain.c.depth + 1).label("depth"))
+            .select_from(orm.Run)
+            .join(run_chain, orm.Run.id == run_chain.c.parent_run_id)
+        )
+
+        ranked = (
+            select(
+                orm.Message.uid,
+                func.row_number()
+                .over(
+                    partition_by=orm.Message.id,
+                    order_by=run_chain.c.depth.asc(),
+                )
+                .label("rn"),
+            )
+            .join(run_chain, orm.Message.run_id == run_chain.c.run_id)
+            .subquery()
+        )
+
+        query = (
+            select(orm.Message)
+            .join(ranked, orm.Message.uid == ranked.c.uid)
+            .where(ranked.c.rn == 1)
+            .order_by(orm.Message.created_at.asc(), orm.Message.id.asc())
+        )
+
+        result = await session.execute(query)
+        return list(result.unique().scalars().all())
+
+    @traced
+    async def get_thread_history(
+        self, *, user_id: str, thread_id: str, run_id: str | None
+    ) -> tuple[orm.Thread, orm.Run | None, list[orm.Message]]:
+        async with self._get_session() as session:
+            thread = await self._get_thread(session, user_id=user_id, id=thread_id)
+
+            if run_id is None:
+                if not thread.runs:
+                    return thread, None, []
+                run = thread.runs[-1]
+            else:
+                try:
+                    run = next(r for r in thread.runs if r.id == run_id)
+                except StopIteration:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parent run not found") from None
+
+            messages = await self._get_thread_messages(session, run_id=run.id)
+            return thread, run, messages
 
     @traced
     async def delete_threads(self, *, user_id: str, ids: list[str]) -> None:

@@ -5,7 +5,7 @@ import os
 import httpx
 import pytest
 
-from tests.utils import make_app_client
+from tests.utils import Sentinels, make_app_client
 
 
 @pytest.fixture(autouse=True)
@@ -55,3 +55,8 @@ def enhance_raise_for_status(session_mocker):
 def app_client():
     with make_app_client() as client:
         yield client
+
+
+@pytest.fixture
+def sentinels():
+    yield Sentinels()
