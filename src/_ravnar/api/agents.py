@@ -55,7 +55,7 @@ def _make_dynamic_agents_router(
         user: User = Depends(authorized_user_with("agents:write")),  # noqa: B008
     ) -> schema.AgentInfo:
         agent = data.agent()
-        agent_handler.add_agent(data.id, agent)
+        await agent_handler.add_agent(data.id, agent)
         return schema.AgentInfo(
             id=data.id,
             capabilities=agent.get_capabilities(),
@@ -67,4 +67,4 @@ def _make_dynamic_agents_router(
         agent_id: Annotated[str, Path(alias="agentId")],
         user: User = Depends(authorized_user_with("agents:delete")),  # noqa: B008
     ) -> None:
-        agent_handler.remove_agent(agent_id)
+        await agent_handler.remove_agent(agent_id)

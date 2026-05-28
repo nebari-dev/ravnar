@@ -17,6 +17,7 @@ __all__ = [
     "Event",
     "QuickPrompt",
     "RenameThreadData",
+    "Run",
     "Thread",
 ]
 
@@ -55,7 +56,15 @@ class AgentInfo(BaseModel):
 
 
 class APIConfig(BaseModel):
+    storage_enabled: bool
     dynamic_agents_enabled: bool
+
+
+class Run(BaseModel):
+    id: str
+    thread_id: str
+    parent_run_id: str | None = None
+    created_at: datetime
 
 
 class Thread(BaseModel):
@@ -63,13 +72,12 @@ class Thread(BaseModel):
     name: str | None = None
     agent_id: str
     created_at: datetime
-    updated_at: datetime
+    runs: list[Run]
 
 
 class AugmentedMessageMixin(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     created_at: datetime = Field(default_factory=now)
-    updated_at: datetime | None = None
 
     @classmethod
     def _convert_orm_tool_call(cls, tool_call: orm.ToolCall) -> ag_ui.core.ToolCall:
@@ -178,6 +186,8 @@ class CreateThreadData(BaseModel):
 
 
 class CreateRunData(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    parent_run_id: str | None = None
     messages: list[AugmentedUserMessage | AugmentedToolMessage]
     tools: list[ag_ui.core.Tool] = Field(default_factory=list)
     context: list[ag_ui.core.Context] = Field(default_factory=list)

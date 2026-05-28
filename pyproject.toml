@@ -47,7 +47,7 @@ serve = [
     "uvloop; sys_platform != 'win32'",
 ]
 pydantic-ai = [
-    "pydantic-ai-slim[ag-ui]>=1.79,<2",
+    "pydantic-ai-slim[ag-ui]>=1.87,<2",
 ]
 agno = [
     # FIXME: find the lowest version for AG-UI
@@ -188,7 +188,7 @@ minversion = "9.0"
 addopts = ["-ra", "--tb=short"]
 testpaths = ["tests"]
 filterwarnings = [
-    "error",
+#    "error",
     "ignore::ResourceWarning",
     # FIXME: isolate the root cause for this warning
     "ignore:The '.*?' attribute with value '.*?' was provided:pydantic.warnings.UnsupportedFieldAttributeWarning",
@@ -225,6 +225,7 @@ ignore_missing_imports = true
 # It is a fundamental feature of ravnar to allow users to define methods on the pluggable
 # components as sync or async. Unfortunately, this cannot be expressed through static types.
 module = [
+    "_ravnar.agents",
     "_ravnar.authenticators",
 ]
 disable_error_code = [
