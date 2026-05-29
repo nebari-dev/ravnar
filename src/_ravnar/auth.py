@@ -12,6 +12,8 @@ from fastapi import Depends, HTTPException, status
 from pydantic import AfterValidator, Field, field_validator
 from pydantic import BaseModel as _BaseModel
 
+from _ravnar.utils import resolve_forward_references
+
 PERMISSION_REGISTRY: dict[str, list[str]] = {
     "files": ["read", "write", "delete"],
     "threads": ["read", "write", "delete"],
@@ -51,7 +53,7 @@ class User(_BaseModel):
 
     @classmethod
     def default(cls) -> Self:
-        return cls(id=cls._current_user())
+        return cls(id=cls._current_user(), permissions=list(ALL_PERMISSIONS))
 
     @staticmethod
     @functools.cache
@@ -81,11 +83,9 @@ def make_authorized_user_factory(
     if security_config.authenticator is None:
 
         async def authenticated_user() -> User:
-            return User(id=User._current_user(), permissions=list(ALL_PERMISSIONS))
+            return User.default()
     else:
         authenticator = security_config.authenticator()
-        from _ravnar.utils import resolve_forward_references
-
         authenticated_user = resolve_forward_references(authenticator.authenticate)
 
     def authorized_user_with(*permissions: str) -> Callable[..., Awaitable[User]]:
