@@ -111,7 +111,7 @@ def make_router(
     @router.sse("/{threadId}/runs", methods=["POST"], response_model=schema.Event, tags=["Runs"])
     async def create_run(
         *,
-        user: User = Depends(authorized_user_with("threads:write")),  # noqa: B008
+        user: User = Depends(authorized_user_with("threads:read", "threads:write", "agents:read")),  # noqa: B008
         thread_id: Annotated[str, Path(alias="threadId")],
         data: schema.CreateRunData,
     ) -> fastsse.Response:

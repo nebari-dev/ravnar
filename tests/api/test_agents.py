@@ -3,9 +3,10 @@ import pydantic
 import pytest
 from fastapi import status
 
+import ravnar.agents
 from _ravnar import schema
 from _ravnar.config import BaseConfig
-from tests.utils import make_app_client
+from tests.utils import HeaderAuthenticator, make_app_client
 
 
 def make_config(*, dynamic_enabled=False):
@@ -13,12 +14,12 @@ def make_config(*, dynamic_enabled=False):
         {
             "agents": {
                 "static": {
-                    "default": {"cls_or_fn": "ravnar.agents.DefaultAgent"},
+                    "default": ravnar.agents.DefaultAgent,
                 },
                 "dynamic": {"enabled": dynamic_enabled},
             },
             "security": {
-                "authenticator": "tests.utils.ForwardedUserAuthenticator",
+                "authenticator": HeaderAuthenticator,
             },
         }
     )
@@ -32,12 +33,12 @@ class TestDynamicAgentsDisabled:
                 {
                     "agents": {
                         "static": {
-                            "default": {"cls_or_fn": "ravnar.agents.DefaultAgent"},
+                            "default": ravnar.agents.DefaultAgent,
                         },
                         "dynamic": {"enabled": False},
                     },
                     "security": {
-                        "authenticator": "tests.utils.ForwardedUserAuthenticator",
+                        "authenticator": HeaderAuthenticator,
                     },
                 }
             )

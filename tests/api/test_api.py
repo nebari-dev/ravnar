@@ -1,4 +1,5 @@
 import dataclasses
+import json
 
 import pytest
 from fastapi import status
@@ -6,7 +7,7 @@ from fastapi import status
 from _ravnar import schema
 from _ravnar.auth import ALL_PERMISSIONS
 from _ravnar.config import BaseConfig
-from tests.utils import ForwardedUserAuthenticator, make_app_client
+from tests.utils import HeaderAuthenticator, make_app_client, safe_extract_response_content
 
 
 @pytest.mark.parametrize("storage_enabled", [True, False])
@@ -43,7 +44,9 @@ class AuthorizationCase:
             method="GET", endpoint="/api/threads/{threadId}/messages", required_permissions=["threads:read"]
         ),
         AuthorizationCase(
-            method="POST", endpoint="/api/threads/{threadId}/runs", required_permissions=["threads:write"]
+            method="POST",
+            endpoint="/api/threads/{threadId}/runs",
+            required_permissions=["threads:read", "threads:write", "agents:read"],
         ),
         AuthorizationCase(
             method="POST", endpoint="/api/threads/{threadId}/rename", required_permissions=["threads:write"]
@@ -52,11 +55,13 @@ class AuthorizationCase:
     ],
     ids=lambda case: f"{case.method} {case.endpoint}",
 )
-def test_authorization_insufficient_permissions(case: AuthorizationCase):
+def test_authorization(case: AuthorizationCase):
     with make_app_client(
         config=BaseConfig.model_validate(
             {
-                "security": {"authenticator": ForwardedUserAuthenticator},
+                "security": {
+                    "authenticator": {"cls_or_fn": HeaderAuthenticator, "params": {"default_permissions": []}}
+                },
                 "storage": {"enabled": True},
                 "agents": {"dynamic": {"enabled": True}},
             }
@@ -65,7 +70,17 @@ def test_authorization_insufficient_permissions(case: AuthorizationCase):
         response = client.request(
             case.method,
             case.endpoint,
-            headers={"Permissions": ",".join(ALL_PERMISSIONS - set(case.required_permissions))},
+            headers={"Permissions": json.dumps(case.required_permissions)},
+        )
+        if response.status_code == status.HTTP_403_FORBIDDEN:
+            raise AssertionError(
+                f"Unexpected status code: {response.status_code} != {status.HTTP_403_FORBIDDEN}, {safe_extract_response_content(response)}"
+            )
+
+        response = client.request(
+            case.method,
+            case.endpoint,
+            headers={"Permissions": json.dumps(list(ALL_PERMISSIONS - set(case.required_permissions)))},
         )
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert "Insufficient permissions" in response.text

@@ -1,11 +1,9 @@
-import contextlib
-import json
 import os
 
 import httpx
 import pytest
 
-from tests.utils import Sentinels, make_app_client
+from tests.utils import Sentinels, make_app_client, safe_extract_response_content
 
 
 @pytest.fixture(autouse=True)
@@ -25,19 +23,13 @@ def enhance_raise_for_status(session_mocker):
         try:
             return raise_for_status(self)
         except httpx.HTTPStatusError as error:
-            content = self.read()
-
-            if content:
-                text = f"<{len(content)} non-decodable bytes>"
-                with contextlib.suppress(Exception):
-                    text = content.decode()
-                    text = f"\n{json.dumps(json.loads(content), indent=2)}"
-
-                message = f"{error}\nResponse content: {text}"
-            else:
-                message = str(error)
-
-            raise httpx.HTTPStatusError(message, request=self.request, response=self) from None
+            raise httpx.HTTPStatusError(
+                f"{error}\nResponse content: {content}"
+                if (content := safe_extract_response_content(self))
+                else str(error),
+                request=self.request,
+                response=self,
+            ) from None
 
     yield session_mocker.patch(
         ".".join(
