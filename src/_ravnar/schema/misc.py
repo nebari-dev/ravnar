@@ -33,8 +33,6 @@ class BaseModel(_BaseModel):
 TModel = TypeVar("TModel", bound=BaseModel)
 
 
-# TODO: if we can depend on Python >= 3.11 instead of wrapping a Literal we can create it here.
-#  By then Literal supports variadic input so we can take a list of values and do Literal[*values]
 def create_str_literal(*values: str, default: str | None = None) -> Any:
     if default is None:
         default = PydanticUndefined  # type: ignore[assignment]
@@ -85,7 +83,7 @@ SortOrder = Literal["ascending", "descending"]
 class Pagination(BaseModel, Generic[TSortBy]):
     page_size: int = Field(default=10)
     page_number: int = Field(default=1, ge=1)
-    sort_by: TSortBy | None = None
+    sort_by: TSortBy
     sort_order: SortOrder = "ascending"
 
     @field_validator("page_size", mode="after")
@@ -114,7 +112,7 @@ class Pagination(BaseModel, Generic[TSortBy]):
         return self._is_single_page(self.page_size)
 
     @classmethod
-    def as_single_page(cls, sort_by: TSortBy | None = None, sort_order: SortOrder = "ascending") -> Self:
+    def as_single_page(cls, sort_by: TSortBy, sort_order: SortOrder = "ascending") -> Self:
         return cls(page_size=-1, page_number=1, sort_by=sort_by, sort_order=sort_order)
 
 
