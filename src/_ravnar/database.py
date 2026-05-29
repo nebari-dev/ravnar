@@ -91,10 +91,8 @@ class Database(SetupTeardownMixin):
         orm_type: type[orm.TOrm],
         select_qualifier: Callable[[Select], Select] = lambda query: query,
         load_options: Collection[ORMOption] | None = None,
-        pagination: schema.Pagination | None = None,
+        pagination: schema.Pagination,
     ) -> orm.Page[orm.TOrm]:
-        if pagination is None:
-            pagination = schema.Pagination.as_single_page()
 
         query = select_qualifier(select(orm_type))
 
@@ -106,11 +104,9 @@ class Database(SetupTeardownMixin):
         if total_count > 0:
             load_query = query.options(*load_options) if load_options is not None else query
 
-            if pagination.sort_by is not None:
-                sort_attr = getattr(orm_type, pagination.sort_by)
-                order_fn = asc if pagination.sort_order == "ascending" else desc
-                load_query = load_query.order_by(order_fn(sort_attr))
-
+            sort_attr = getattr(orm_type, pagination.sort_by)
+            order_fn = asc if pagination.sort_order == "ascending" else desc
+            load_query = load_query.order_by(order_fn(sort_attr))
             # always append the primary key to get a stable sort
             load_query = load_query.order_by(*inspect(orm_type).primary_key)
 
@@ -180,9 +176,10 @@ class Database(SetupTeardownMixin):
     async def _get_threads(
         self,
         session: AsyncSession,
+        *,
         user_id: str,
         ids: list[str] | None = None,
-        pagination: schema.Pagination | None = None,
+        pagination: schema.Pagination,
     ) -> orm.Page[orm.Thread]:
         def select_qualifier(query: Select) -> Select:
             query = query.where(orm.Thread.user_id == user_id)
@@ -247,7 +244,7 @@ class Database(SetupTeardownMixin):
         *,
         user_id: str,
         thread_id: str,
-        pagination: schema.Pagination | None = None,
+        pagination: schema.Pagination,
     ) -> orm.Page[orm.Run]:
         async with self._get_session() as session:
 
@@ -323,7 +320,9 @@ class Database(SetupTeardownMixin):
     @traced
     async def delete_threads(self, *, user_id: str, ids: list[str]) -> None:
         async with self._get_session() as session:
-            single_page = await self._get_threads(session, user_id=user_id, ids=ids)
+            single_page = await self._get_threads(
+                session, user_id=user_id, ids=ids, pagination=schema.Pagination.as_single_page(sort_by="created_at")
+            )
             threads = single_page.items
             if len(threads) != len(ids):
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Threads not found")

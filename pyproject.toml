@@ -188,10 +188,8 @@ minversion = "9.0"
 addopts = ["-ra", "--tb=short"]
 testpaths = ["tests"]
 filterwarnings = [
-#    "error",
+   "error",
     "ignore::ResourceWarning",
-    # FIXME: isolate the root cause for this warning
-    "ignore:The '.*?' attribute with value '.*?' was provided:pydantic.warnings.UnsupportedFieldAttributeWarning",
 ]
 xfail_strict = true
 asyncio_mode = "auto"
