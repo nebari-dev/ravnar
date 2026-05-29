@@ -11,32 +11,32 @@ from fastapi.exceptions import HTTPException
 from fastapi.security import APIKeyHeader
 from opentelemetry import trace
 
+from _ravnar.auth import ALL_PERMISSIONS, Permission, User
 from _ravnar.observability import traced
 from _ravnar.utils import as_awaitable
-
-from . import schema
 
 
 class Authenticator(abc.ABC):
     """Authenticator base class"""
 
     @abc.abstractmethod
-    def authenticate(self) -> schema.User: ...
+    def authenticate(self) -> User: ...
 
 
 class DebugAuthenticator(Authenticator):
     """Debug Authenticator"""
 
     @traced
-    async def authenticate(self, request: Request) -> schema.User:
+    async def authenticate(self, request: Request) -> User:
         body = await request.body()
         try:
             body_json = await request.json()
         except Exception:
             body_json = None
 
-        return schema.User(
+        return User(
             id="debug",
+            permissions=list(ALL_PERMISSIONS),
             data={
                 "method": request.method,
                 "headers": dict(request.headers),
@@ -51,19 +51,29 @@ class DebugAuthenticator(Authenticator):
 class ForwardedUserAuthenticator(Authenticator):
     """Forwarded User Authenticator"""
 
-    def __init__(self, *, id_header: str = "X-Forwarded-User"):
+    def __init__(
+        self,
+        *,
+        id_header: str = "X-Forwarded-User",
+        permissions_header: str = "X-Forwarded-Permissions",
+    ):
         @traced(name="ForwardedUserAuthenticator.authenticate")
-        async def authenticate(id: str = Depends(APIKeyHeader(name=id_header))) -> schema.User:
-            return schema.User(id=id)
+        async def authenticate(
+            id: str = Depends(APIKeyHeader(name=id_header)),
+            permissions: str | None = Depends(APIKeyHeader(name=permissions_header, auto_error=False)),
+        ) -> User:
+            # FIXME: validation with APIheader?
+            perm_list = [p.strip() for p in permissions.split(",") if p.strip()] if permissions else []
+            return User(id=id, permissions=perm_list)
 
         self.authenticate = authenticate  # type: ignore[method-assign]
 
-    async def authenticate(self) -> schema.User:  # type: ignore[empty-body]
+    async def authenticate(self) -> User:  # type: ignore[empty-body]
         # This is here to appease the ABC. The actual functionality is set in __init__
         pass
 
 
-TokenValidator = Callable[[str], schema.User] | Callable[[str], Awaitable[schema.User]]
+TokenValidator = Callable[[str], User] | Callable[[str], Awaitable[User]]
 
 
 class OIDCConfig(pydantic.BaseModel):
@@ -80,7 +90,15 @@ class OIDCUser(pydantic.BaseModel):
 class OIDCTokenValidator:
     """OIDC Token Validator"""
 
-    def __init__(self, *, issuer: str, algorithms: list[str] | None = None, audience: str | None = None):
+    def __init__(
+        self,
+        *,
+        issuer: str,
+        algorithms: list[str] | None = None,
+        audience: str | None = None,
+        permissions_claim: str | None = None,
+        default_permissions: list[str] | None = None,
+    ):
         import httpx
         import jwt.types
 
@@ -108,9 +126,16 @@ class OIDCTokenValidator:
             decode_options["verify_aud"] = False
 
         self._decode_kwargs = decode_kwargs
+        self._permissions_claim = permissions_claim
+
+        if default_permissions is None:
+            default_permissions = []
+        else:
+            pydantic.TypeAdapter(list[Permission]).validate_python(default_permissions)
+        self._default_permissions = default_permissions
 
     @traced(name="OIDCTokenValidator")
-    def __call__(self, token: str) -> schema.User:
+    def __call__(self, token: str) -> User:
         try:
             return self._validate(token)
         except HTTPException as exc:
@@ -118,7 +143,7 @@ class OIDCTokenValidator:
             span.add_event("validation_failure", attributes={"reason": exc.detail})
             raise
 
-    def _validate(self, token: str) -> schema.User:
+    def _validate(self, token: str) -> User:
         import jwt
 
         try:
@@ -133,7 +158,23 @@ class OIDCTokenValidator:
         except pydantic.ValidationError as exc:
             raise HTTPException(detail="JWT payload invalid", status_code=status.HTTP_401_UNAUTHORIZED) from exc
 
-        return schema.User(id=oidc_user.sub, data=oidc_user.model_dump(exclude={"sub"}))
+        if self._permissions_claim is not None:
+            claim_value = payload.get(self._permissions_claim)
+            if claim_value is None:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Required permissions claim missing in token",
+                )
+            if not isinstance(claim_value, list) or not all(isinstance(p, str) for p in claim_value):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Permissions claim must be a list of strings",
+                )
+            permissions = claim_value
+        else:
+            permissions = self._default_permissions
+
+        return User(id=oidc_user.sub, permissions=permissions, data=oidc_user.model_dump(exclude={"sub"}))
 
 
 async def get_bearer_token(
@@ -168,5 +209,5 @@ class BearerTokenAuthenticator(Authenticator):
         self._token_validator = token_validator
 
     @traced
-    async def authenticate(self, token: str = Depends(get_bearer_token)) -> schema.User:
+    async def authenticate(self, token: str = Depends(get_bearer_token)) -> User:
         return await as_awaitable(self._token_validator, token)

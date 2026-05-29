@@ -1,13 +1,16 @@
 __all__ = [
+    "ALL_PERMISSIONS",
     "Authenticator",
     "BearerTokenAuthenticator",
     "DebugAuthenticator",
     "ForwardedUserAuthenticator",
     "OIDCTokenValidator",
+    "Permission",
     "TokenValidator",
     "User",
 ]
 
+from _ravnar.auth import ALL_PERMISSIONS, Permission, User
 from _ravnar.authenticators import (
     Authenticator,
     BearerTokenAuthenticator,
@@ -16,7 +19,6 @@ from _ravnar.authenticators import (
     OIDCTokenValidator,
     TokenValidator,
 )
-from _ravnar.schema import User
 
 # isort: split
 

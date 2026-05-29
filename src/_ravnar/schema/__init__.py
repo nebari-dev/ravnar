@@ -23,7 +23,6 @@ __all__ = [
     "Run",
     "TModel",
     "Thread",
-    "User",
     "create_str_literal",
 ]
 
@@ -48,4 +47,4 @@ from .api import (
     Run,
     Thread,
 )
-from .misc import APIRouter, BaseModel, Page, Pagination, TModel, User, create_str_literal
+from .misc import APIRouter, BaseModel, Page, Pagination, TModel, create_str_literal

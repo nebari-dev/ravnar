@@ -1,7 +1,7 @@
 import pytest
 from fastapi import status
 
-from _ravnar import schema
+from _ravnar.auth import User
 from _ravnar.authenticators import BearerTokenAuthenticator, ForwardedUserAuthenticator
 from _ravnar.config import BaseConfig
 from tests.utils import make_app_client
@@ -34,7 +34,7 @@ class TestBearerTokenAuthenticator:
                 "security": {
                     "authenticator": {
                         "cls_or_fn": BearerTokenAuthenticator,
-                        "params": {"token_validator": lambda token: schema.User(id=token)},
+                        "params": {"token_validator": lambda token: User(id=token)},
                     }
                 }
             }

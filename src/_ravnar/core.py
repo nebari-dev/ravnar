@@ -14,10 +14,11 @@ from opentelemetry import trace
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 from _ravnar import schema
+from _ravnar.auth import make_authorized_user_factory
 from _ravnar.events import EventProcessor
 from _ravnar.mixin import SetupTeardownMixin
-from _ravnar.observability import configure_logging, configure_tracing, traced
-from _ravnar.utils import as_awaitable, resolve_forward_references
+from _ravnar.observability import configure_logging, configure_tracing
+from _ravnar.utils import as_awaitable
 
 from .api import make_router as make_api_router
 from .config import AgentConfig, BaseConfig, Config
@@ -57,15 +58,7 @@ class Ravnar:
             allow_methods=["*"],
         )
 
-        authenticated_user: Callable[..., Awaitable[schema.User]]
-        if config.security.authenticator is None:
-
-            async def authenticated_user() -> schema.User:
-                return schema.User.default()
-        else:
-            authenticator = config.security.authenticator()
-
-            authenticated_user = traced(resolve_forward_references(authenticator.authenticate), name="authenticate")
+        authorized_user_with = make_authorized_user_factory(config.security)
 
         @app.get("/", include_in_schema=False)
         async def base_redirect() -> RedirectResponse:
@@ -79,12 +72,14 @@ class Ravnar:
         async def version() -> str:
             return __version__
 
-        api_router = make_api_router(
-            storage_config=config.storage,
-            agent_handler=agent_handler,
-            authenticated_user=authenticated_user,
+        app.include_router(
+            make_api_router(
+                storage_config=config.storage,
+                agent_handler=agent_handler,
+                authorized_user_with=authorized_user_with,
+            ),
+            prefix="/api",
         )
-        app.include_router(api_router, prefix="/api")
 
         # We want to include some prefixes, but the instrumentor only lets us exclude URLs. We achieve what we want by
         # building a negative regex that matches all URLs except for the prefixes we want to include

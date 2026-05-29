@@ -1,4 +1,5 @@
 import contextlib
+import json
 import re
 import uuid
 from datetime import UTC, date, datetime, timedelta
@@ -8,7 +9,7 @@ from fastapi import Depends
 from fastapi.security import APIKeyHeader
 from fastapi.testclient import TestClient as _TestClient
 
-from _ravnar import schema
+from _ravnar.auth import ALL_PERMISSIONS, User
 from _ravnar.config import BaseConfig
 from _ravnar.core import Ravnar
 from ravnar.authenticators import Authenticator
@@ -28,11 +29,21 @@ class TestClient(_TestClient):
         return next(iter(self.config.agents.static))
 
 
-class ForwardedUserAuthenticator(Authenticator):
-    """Forwarded User Authenticator"""
+class HeaderAuthenticator(Authenticator):
+    """Forwarded User Authenticator for testing"""
 
-    async def authenticate(self, id: Annotated[str | None, Depends(APIKeyHeader(name="User", auto_error=False))]):
-        return schema.User(id=id or "pytest")
+    def __init__(self, default_permissions=None):
+        self._default_permissions = default_permissions if default_permissions is not None else ALL_PERMISSIONS
+
+    async def authenticate(
+        self,
+        id: Annotated[str | None, Depends(APIKeyHeader(name="User", auto_error=False))],
+        permissions: Annotated[str | None, Depends(APIKeyHeader(name="Permissions", auto_error=False))],
+    ):
+        return User(
+            id=id or "pytest",
+            permissions=json.loads(permissions) if permissions is not None else self._default_permissions,
+        )
 
 
 @contextlib.contextmanager
@@ -41,7 +52,7 @@ def make_app_client(config=None):
         config = BaseConfig.model_validate(
             {
                 "security": {
-                    "authenticator": ForwardedUserAuthenticator,
+                    "authenticator": HeaderAuthenticator,
                 },
             }
         )
@@ -89,3 +100,12 @@ class Sentinels:
             return False
 
         return obj.date() == date(1970, 1, 1)
+
+
+def safe_extract_response_content(response):
+    content = response.read()
+    decoded_content = f"<{len(content)} non-decodable bytes>"
+    with contextlib.suppress(Exception):
+        decoded_content = content.decode()
+        decoded_content = f"\n{json.dumps(json.loads(content), indent=2)}"
+    return decoded_content

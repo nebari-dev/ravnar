@@ -6,17 +6,17 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, Response
 
-from _ravnar import schema
+from _ravnar.auth import User
 from _ravnar.file_storage import FileHandler, FileInputContent, convert_file_to_input_content
 
 
-def make_router(*, file_handler: FileHandler, authenticated_user: Callable[..., Any]) -> APIRouter:
+def make_router(*, file_handler: FileHandler, authorized_user_with: Callable[..., Any]) -> APIRouter:
     router = APIRouter(tags=["Files"])
 
     @router.post("")
     async def upload_file(
         *,
-        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        user: User = Depends(authorized_user_with("files:write")),  # noqa: B008
         file_input_content: Annotated[FileInputContent, Body()],
     ) -> FileInputContent:
         file, _ = await file_handler.add(file_input_content, user_id=user.id)
@@ -25,7 +25,7 @@ def make_router(*, file_handler: FileHandler, authenticated_user: Callable[..., 
     @router.get("/{id}")
     async def get_file(
         *,
-        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        user: User = Depends(authorized_user_with("files:read")),  # noqa: B008
         id: uuid.UUID,
     ) -> FileInputContent:
         return convert_file_to_input_content(await file_handler.get(id, user_id=user.id))
@@ -33,7 +33,7 @@ def make_router(*, file_handler: FileHandler, authenticated_user: Callable[..., 
     @router.get("/{id}/content")
     async def read_file(
         *,
-        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        user: User = Depends(authorized_user_with("files:read")),  # noqa: B008
         id: uuid.UUID,
     ) -> Response:
         mime_type, content = await file_handler.read(id, user_id=user.id)
@@ -46,7 +46,7 @@ def make_router(*, file_handler: FileHandler, authenticated_user: Callable[..., 
     @router.delete("/{id}")
     async def delete_file(
         *,
-        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        user: User = Depends(authorized_user_with("files:delete")),  # noqa: B008
         id: uuid.UUID,
     ) -> None:
         await file_handler.delete(id, user_id=user.id)

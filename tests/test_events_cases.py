@@ -143,10 +143,11 @@ def new_event_timestamp():
     return int(time.time_ns() / 1_000_000)
 
 
-class EventProcessingCase(schema.BaseModel):
+@dataclasses.dataclass(kw_only=True, frozen=True)
+class EventProcessingCase:
     parent_state: orm.State = None
-    parent_messages: list[orm.Message] = pydantic.Field(default_factory=list)
-    thread_id: str = pydantic.Field(default_factory=new_id)
+    parent_messages: list[orm.Message] = dataclasses.field(default_factory=list)
+    thread_id: str = dataclasses.field(default_factory=new_id)
     create_run_data: schema.CreateRunData
     handle_run_lifecycle_events: bool = True
     agent_event_stream: list[ag_ui.core.Event]

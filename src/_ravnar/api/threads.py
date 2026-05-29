@@ -11,6 +11,7 @@ from fastapi import Depends, HTTPException, Path, Query, status
 from opentelemetry import trace
 
 from _ravnar import schema
+from _ravnar.auth import User, assert_permissions
 from _ravnar.file_storage import FileHandler, WrappedMetadata
 from _ravnar.observability import traced
 from _ravnar.utils import as_awaitable
@@ -35,14 +36,14 @@ def make_router(
     database: Database,
     file_handler: FileHandler,
     agent_handler: AgentHandler,
-    authenticated_user: Callable[..., Any],
+    authorized_user_with: Callable[..., Any],
 ) -> schema.APIRouter:
-    router = schema.APIRouter(tags=["Threads"], dependencies=[Depends(authenticated_user)])
+    router = schema.APIRouter(tags=["Threads"])
 
     @router.post("")
     async def create_thread(
         *,
-        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        user: User = Depends(authorized_user_with("threads:write")),  # noqa: B008
         data: schema.CreateThreadData,
     ) -> schema.Thread:
         agent_handler.assert_available(data.agent_id)
@@ -54,7 +55,7 @@ def make_router(
     @router.get("")
     async def get_threads(
         *,
-        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        user: User = Depends(authorized_user_with("threads:read")),  # noqa: B008
         pagination: Annotated[schema.Pagination[ThreadsSortBy], Query()],
     ) -> schema.Page[schema.Thread]:
         return schema.Page[schema.Thread].model_validate(
@@ -64,14 +65,14 @@ def make_router(
     @router.get("/{threadId}")
     async def get_thread(
         id: Annotated[str, Path(alias="threadId")],
-        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        user: User = Depends(authorized_user_with("threads:read")),  # noqa: B008
     ) -> schema.Thread:
         return schema.Thread.model_validate(await database.get_thread(user_id=user.id, id=id), from_attributes=True)
 
     @router.get("/{threadId}/messages")
     async def get_thread_messages(
         thread_id: Annotated[str, Path(alias="threadId")],
-        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        user: User = Depends(authorized_user_with("threads:read")),  # noqa: B008
     ) -> list[schema.AugmentedMessage]:
         _, _, messages = await database.get_thread_history(user_id=user.id, thread_id=thread_id, run_id=None)
         return pydantic.TypeAdapter(list[schema.AugmentedMessage]).validate_python(messages, from_attributes=True)
@@ -79,7 +80,7 @@ def make_router(
     @router.get("/{threadId}/runs")
     async def get_runs(
         *,
-        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        user: User = Depends(authorized_user_with("threads:read")),  # noqa: B008
         thread_id: Annotated[str, Path(alias="threadId")],
         pagination: Annotated[schema.Pagination[RunsSortBy], Query()],
     ) -> schema.Page[schema.Run]:
@@ -91,7 +92,7 @@ def make_router(
     @router.get("/{threadId}/runs/{runId}")
     async def get_run(
         *,
-        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        user: User = Depends(authorized_user_with("threads:read")),  # noqa: B008
         thread_id: Annotated[str, Path(alias="threadId")],
         run_id: Annotated[str, Path(alias="runId")],
     ) -> schema.Run:
@@ -100,7 +101,7 @@ def make_router(
     @router.get("/{threadId}/runs/{runId}/messages")
     async def get_run_messages(
         *,
-        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        user: User = Depends(authorized_user_with("threads:read")),  # noqa: B008
         thread_id: Annotated[str, Path(alias="threadId")],
         run_id: Annotated[str, Path(alias="runId")],
     ) -> list[schema.AugmentedMessage]:
@@ -110,7 +111,7 @@ def make_router(
     @router.sse("/{threadId}/runs", methods=["POST"], response_model=schema.Event, tags=["Runs"])
     async def create_run(
         *,
-        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        user: User = Depends(authorized_user_with("threads:read", "threads:write", "agents:read")),  # noqa: B008
         thread_id: Annotated[str, Path(alias="threadId")],
         data: schema.CreateRunData,
     ) -> fastsse.Response:
@@ -147,9 +148,10 @@ def make_router(
     async def hydrate_files(
         messages: list[schema.AugmentedMessage],
         *,
-        user: schema.User,
+        user: User,
         file_handler: FileHandler,
     ) -> None:
+        assert_permissions(user, "files:read", "files:write")
         for m in messages:
             if not isinstance(m, schema.AugmentedUserMessage):
                 continue
@@ -173,7 +175,7 @@ def make_router(
     @router.post("/{threadId}/rename")
     async def rename_thread(
         *,
-        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        user: User = Depends(authorized_user_with("threads:write")),  # noqa: B008
         id: Annotated[str, Path(alias="threadId")],
         data: schema.RenameThreadData,
     ) -> schema.Thread:
@@ -184,7 +186,7 @@ def make_router(
     @router.delete("")
     async def delete_threads(
         *,
-        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        user: User = Depends(authorized_user_with("threads:delete")),  # noqa: B008
         data: schema.DeleteThreadsData,
     ) -> None:
         await database.delete_threads(user_id=user.id, ids=data.ids)
@@ -192,7 +194,7 @@ def make_router(
     @router.delete("/{threadId}")
     async def delete_thread(
         *,
-        user: schema.User = Depends(authenticated_user),  # noqa: B008
+        user: User = Depends(authorized_user_with("threads:delete")),  # noqa: B008
         thread_id: Annotated[str, Path(alias="threadId")],
     ) -> None:
         await database.delete_threads(user_id=user.id, ids=[thread_id])

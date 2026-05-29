@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import Depends
 
 from _ravnar import schema
+from _ravnar.auth import User
 from _ravnar.config import StorageConfig
 
 from .agents import make_router as make_agents_router
@@ -20,14 +21,20 @@ def make_router(
     *,
     storage_config: StorageConfig,
     agent_handler: AgentHandler,
-    authenticated_user: Callable[..., Any],
+    authorized_user_with: Callable[..., Any],
 ) -> schema.APIRouter:
-    router = schema.APIRouter(tags=["API"], dependencies=[Depends(authenticated_user)])
+    router = schema.APIRouter(
+        tags=["API"],
+        # This ensures that every endpoint on this router or its sub-routers
+        # can only be accessed by authenticated users. The actual authorization
+        # check happens on the specific endpoint.
+        dependencies=[Depends(authorized_user_with())],
+    )
 
     @router.get("/user")
     async def get_user(
-        user: schema.User = Depends(authenticated_user),  # noqa: B008
-    ) -> schema.User:
+        user: User = Depends(authorized_user_with()),  # noqa: B008
+    ) -> User:
         return user
 
     @router.get("/config")
@@ -42,12 +49,12 @@ def make_router(
             _make_stateful_router(
                 storage_config=storage_config,
                 agent_handler=agent_handler,
-                authenticated_user=authenticated_user,
+                authorized_user_with=authorized_user_with,
             )
         )
 
     router.include_router(
-        make_agents_router(agent_handler=agent_handler, authenticated_user=authenticated_user), prefix="/agents"
+        make_agents_router(agent_handler=agent_handler, authorized_user_with=authorized_user_with), prefix="/agents"
     )
 
     return router
@@ -57,7 +64,7 @@ def _make_stateful_router(
     *,
     storage_config: StorageConfig,
     agent_handler: AgentHandler,
-    authenticated_user: Callable[..., Any],
+    authorized_user_with: Callable[..., Any],
 ) -> schema.APIRouter:
     from _ravnar.database import Database
     from _ravnar.file_storage import FileHandler
@@ -72,7 +79,7 @@ def _make_stateful_router(
     )
 
     router.include_router(
-        make_files_router(file_handler=file_handler, authenticated_user=authenticated_user),
+        make_files_router(file_handler=file_handler, authorized_user_with=authorized_user_with),
         prefix="/files",
     )
     router.include_router(
@@ -80,7 +87,7 @@ def _make_stateful_router(
             database=database,
             file_handler=file_handler,
             agent_handler=agent_handler,
-            authenticated_user=authenticated_user,
+            authorized_user_with=authorized_user_with,
         ),
         prefix="/threads",
     )

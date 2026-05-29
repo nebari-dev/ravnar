@@ -1,9 +1,6 @@
-__all__ = ["APIRouter", "BaseModel", "Page", "Pagination", "TModel", "User", "UtcDateTime", "create_str_literal"]
+__all__ = ["APIRouter", "BaseModel", "Page", "Pagination", "TModel", "UtcDateTime", "create_str_literal"]
 
-import contextlib
 import functools
-import getpass
-import os
 from datetime import UTC, datetime
 from typing import Annotated, Any, Generic, Literal, Self, TypeVar, cast
 
@@ -58,24 +55,6 @@ def _set_utc_timezone(v: datetime) -> datetime:
 
 
 UtcDateTime = Annotated[datetime, AfterValidator(_set_utc_timezone)]
-
-
-class User(BaseModel):
-    id: str
-    data: dict[str, Any] = Field(default_factory=dict)
-
-    @classmethod
-    def default(cls) -> Self:
-        return cls(id=cls._current_user())
-
-    @staticmethod
-    @functools.cache
-    def _current_user() -> str:
-        with contextlib.suppress(Exception):
-            return getpass.getuser()
-        with contextlib.suppress(Exception):
-            return os.getlogin()
-        return "Huginn"
 
 
 TSortBy = TypeVar("TSortBy", bound=str)
