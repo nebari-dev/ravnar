@@ -8,11 +8,30 @@ import re
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, Self
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, Response, status
 from pydantic import AfterValidator, Field, field_validator
 from pydantic import BaseModel as _BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from _ravnar.utils import resolve_forward_references
+
+CallNext = Callable[[Request], Awaitable[Response]]
+
+
+DEFAULT_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Content-Security-Policy": "default-src 'none'",
+}
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next: CallNext) -> Response:
+        response: Response = await call_next(request)
+        for key, value in DEFAULT_SECURITY_HEADERS.items():
+            response.headers.setdefault(key, value)
+        return response
+
 
 PERMISSION_REGISTRY: dict[str, list[str]] = {
     "files": ["read", "write", "delete"],

@@ -5,8 +5,8 @@ import pytest
 from fastapi import status
 
 from _ravnar import schema
-from _ravnar.auth import ALL_PERMISSIONS
 from _ravnar.config import BaseConfig
+from _ravnar.security import ALL_PERMISSIONS
 from tests.utils import HeaderAuthenticator, make_app_client, safe_extract_response_content
 
 

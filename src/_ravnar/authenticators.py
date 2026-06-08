@@ -11,8 +11,8 @@ from fastapi.exceptions import HTTPException
 from fastapi.security import APIKeyHeader
 from opentelemetry import trace
 
-from _ravnar.auth import ALL_PERMISSIONS, Permission, User
 from _ravnar.observability import traced
+from _ravnar.security import ALL_PERMISSIONS, Permission, User
 from _ravnar.utils import as_awaitable
 
 

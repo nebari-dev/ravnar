@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING, Any
 from fastapi import Depends
 
 from _ravnar import schema
-from _ravnar.auth import User
 from _ravnar.config import StorageConfig
+from _ravnar.security import User
 
 from .agents import make_router as make_agents_router
 from .files import make_router as make_files_router

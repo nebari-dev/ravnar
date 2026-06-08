@@ -9,9 +9,9 @@ from fastapi import Depends
 from fastapi.security import APIKeyHeader
 from fastapi.testclient import TestClient as _TestClient
 
-from _ravnar.auth import ALL_PERMISSIONS, User
 from _ravnar.config import BaseConfig
 from _ravnar.core import Ravnar
+from _ravnar.security import ALL_PERMISSIONS, User
 from ravnar.authenticators import Authenticator
 
 

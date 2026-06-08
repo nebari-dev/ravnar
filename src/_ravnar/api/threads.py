@@ -11,9 +11,9 @@ from fastapi import Depends, HTTPException, Path, Query, status
 from opentelemetry import trace
 
 from _ravnar import schema
-from _ravnar.auth import User, assert_permissions
 from _ravnar.file_storage import FileHandler, WrappedMetadata
 from _ravnar.observability import traced
+from _ravnar.security import User, assert_permissions
 from _ravnar.utils import as_awaitable
 
 tracer = trace.get_tracer(__name__)
