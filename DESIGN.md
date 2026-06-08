@@ -2,7 +2,7 @@
 
 ## Summary
 
-Replace the unrestricted `jinja2.Environment` used in config template rendering with `jinja2.sandbox.SandboxedEnvironment`. For **startup config rendering**, use the full `os.environ` with `StrictUndefined` to catch typos. For **runtime agent registration** (dynamic agents via API), use a restricted whitelist of environment variables to prevent a privilege-escalation exfiltration attack where a user with `agents:write` permission reads arbitrary secrets via `getCapabilities()`.
+Replace the unrestricted `jinja2.Environment` used in config template rendering with `jinja2.sandbox.SandboxedEnvironment`. For **startup config rendering**, use the full `os.environ` with `StrictUndefined` to catch typos. For **runtime agent registration** (dynamic agents via API), use a configurable allowlist of environment variables (default empty) to prevent a privilege-escalation exfiltration attack where a user with `agents:write` permission reads arbitrary secrets via `getCapabilities()`. The admin explicitly controls which env vars are exposed to dynamic agents via `agents.dynamic.allowed_env_vars` in the config.
 
 ## Goals
 
@@ -71,35 +71,59 @@ The `context` parameter controls which environment variables are exposed to the 
 
 This is the standard mitigation recommended by Jinja2's own documentation for security-sensitive applications. Combined with `StrictUndefined`, it blocks code execution and prevents silent misconfigurations.
 
-### 2. Restricted Context (Runtime Only)
+### 2. Configurable Allowlist for Runtime Agent Registration
 
-For runtime agent registration, construct a restricted context dict with a whitelist of environment variables:
+Add `allowed_env_vars` to `DynamicAgentConfig`:
 
 ```python
-_ALLOWED_ENV_VARS = frozenset({
-    "HOME", "USER", "USERNAME",
-    "HOSTNAME", "HOST",
-    "PATH",
-    # All RAVNAR_* variables
-})
+class DynamicAgentConfig(BaseModel, RenderableMixin):
+    enabled: bool = False
+    allowed_env_vars: list[str] = Field(default_factory=list)
+```
 
-def _build_restricted_template_context() -> dict[str, str]:
+The default is an empty list: **no environment variables are exposed to dynamic agents by default**. The admin must explicitly list each variable name that should be available in templates during runtime agent registration.
+
+For runtime agent registration, construct a restricted context dict from the configured allowlist:
+
+```python
+
+def _build_restricted_template_context(allowed_vars: list[str]) -> dict[str, str]:
     return {
         k: v for k, v in os.environ.items()
-        if k in _ALLOWED_ENV_VARS or k.startswith("RAVNAR_")
+        if k in allowed_vars
     }
 ```
 
 This restricted context is **only** passed to `render_template` during `ImportStringWithParams` validation for runtime agent registration (i.e., `RegisterAgentData`). It is **not** used for startup config rendering.
 
-This ensures:
-- All `RAVNAR_*` variables are available (these are the intended variables for configuring ravnar).
-- Common system variables like `HOME`, `USER`, `HOSTNAME` are available (they are commonly referenced in config paths).
-- All other environment variables (e.g., `AWS_*`, `DB_*`, `SECRET_*`, `PATH` — wait, `PATH` is explicitly allowed above) are not exposed.
+**Passing the context to runtime rendering:** `render_template` is called from Pydantic validators (`ImportStringWithParams._render_field_templates` and `_render_param_items`), which are class methods and do not receive request state directly. Use a `contextvars.ContextVar` to pass the restricted context implicitly during request parsing. A FastAPI `yield` dependency on the dynamic agents routes sets the context variable before request body parsing and clears it afterward:
 
-The whitelist should be documented in the hardening guide. Users who need additional env vars in dynamic agent templates can request additions through a code change rather than via configuration (since the whitelist is a code constant, not a config item, to prevent self-defeat).
+```python
+import contextvars
 
-**Note:** Because `StrictUndefined` is used, any template referencing a non-whitelisted env var will raise `UndefinedError` at runtime. For conditional values, use the `default` filter (`{{ VAR | default("fallback") }}`) or the `is defined` test (`{% if VAR is defined %}...{% endif %}`) instead of `if VAR else`, which evaluates the variable in boolean context and triggers `UndefinedError`.
+_template_context: contextvars.ContextVar[dict[str, str] | None] = contextvars.ContextVar("_template_context", default=None)
+
+def render_template(s: Any, *, context: dict[str, str] | None = None) -> Any:
+    if isinstance(s, str):
+        env = jinja2.sandbox.SandboxedEnvironment(undefined=jinja2.StrictUndefined)
+        ctx = context if context is not None else (_template_context.get() or dict(os.environ))
+        return env.from_string(s).render(**ctx)
+    ...
+
+async def _set_restricted_template_context(config: Config = Depends(get_config)):
+    _template_context.set(_build_restricted_template_context(config.agents.dynamic.allowed_env_vars))
+    yield
+    _template_context.set(None)
+
+# Applied to dynamic agents routes:
+@router.post("", dependencies=[Depends(_set_restricted_template_context)])
+```
+
+For startup config, `_template_context` is not set, so `render_template` falls back to the full `os.environ`.
+
+**Why default-deny:** The attack model is a user with `agents:write` registering an agent that exfiltrates arbitrary env vars via `getCapabilities()`. The admin controls the ravnar config file (or deployment configuration), so they can explicitly decide which env vars are safe to expose to dynamic agents. A hardcoded whitelist would either be too permissive (blocking legitimate use cases) or require code changes for every deployment. A config value lets the admin make the security decision at deployment time.
+
+**Note:** Because `StrictUndefined` is used, any template referencing a non-allowed env var will raise `UndefinedError` at runtime. For conditional values, use the `default` filter (`{{ VAR | default("fallback") }}`) or the `is defined` test (`{% if VAR is defined %}...{% endif %}`) instead of `if VAR else`, which evaluates the variable in boolean context and triggers `UndefinedError`.
 
 ### 3. Dict Key Rendering
 
@@ -129,7 +153,7 @@ No explicit warning is added for the sandboxing change — it is a silent fix. N
 
 - **Template features that are sandboxed:** `SandboxedEnvironment` blocks dunder access, dangerous builtins, and arbitrary calls. It does **not** block `range()`, `cycler()`, `joiner()`, `namespace()`, or `{% extends %}` / `{% include %}` — but since no template loader is configured, file-based inheritance is already non-functional. None of these features are used in ravnar's config templates (they are short, single-line expressions like `{{ HOME }}/data`).
 - **StrictUndefined breakage:** `StrictUndefined` raises on any access to a missing variable. This breaks the common Jinja2 idiom `{{ VAR if VAR else "default" }}` because the boolean check counts as an access. The supported alternatives are `{{ VAR | default("default") }}` and `{% if VAR is defined %}...{% endif %}`. This is a deliberate breaking change for security: silent empty strings are unacceptable for config values.
-- **Whitelist maintenance:** If a legitimate use case requires an env var not in the whitelist, a code change is needed. This is intentional — environment variables are a broad attack surface and should not be blindly exposed.
+- **Allowlist configuration:** The admin must explicitly configure `agents.dynamic.allowed_env_vars` for each env var needed by dynamic agents. This is a one-time deployment decision per variable. The default-deny model is secure but requires admin awareness. If a user tries to register a dynamic agent that references an unallowed env var, the registration fails with `UndefinedError`. The error message should be clear enough to guide the admin to add the variable to the allowlist.
 - **Jinja2 sandbox security:** The sandbox is not perfect — sandbox escapes have been found in Jinja2 before. However, it raises the bar significantly. The restricted context further limits what an attacker could reach even with a sandbox escape.
 - **Performance:** `SandboxedEnvironment` has a small overhead compared to `Environment`. Config rendering happens once at startup, so this is negligible.
 
@@ -143,15 +167,16 @@ No explicit warning is added for the sandboxing change — it is a silent fix. N
   - Render `{{ self.__class__.__mro__ }}` → raises `SecurityError`.
   - Render `{{ ''.__class__.__mro__ }}` → raises `SecurityError`.
 - **Unit tests for restricted context (runtime only):**
-  - Env vars in the whitelist are accessible during runtime agent registration.
-  - Env vars not in the whitelist raise `UndefinedError` during runtime agent registration.
-  - `RAVNAR_*` vars are all accessible regardless of whitelist membership.
+  - Env vars in `allowed_env_vars` are accessible during runtime agent registration.
+  - Env vars not in `allowed_env_vars` raise `UndefinedError` during runtime agent registration.
+  - Default empty allowlist: any env var reference raises `UndefinedError`.
   - `StrictUndefined` tests: `{{ VAR | default("x") }}` → `"x"`; `{% if VAR is defined %}...{% endif %}` → renders fallback; `{{ VAR if VAR else "x" }}` → `UndefinedError`.
 - **Integration tests:**
   - Start ravnar with a config that uses `{{ HOME }}` in a path — verify the path resolves correctly.
   - Start ravnar with a config that uses an arbitrary env var (e.g., `{{ MY_SECRET }}`) — verify the path resolves correctly (full context is available for config).
-  - Register a dynamic agent via API with a whitelisted env var in params — verify it succeeds.
-  - Register a dynamic agent via API with a non-whitelisted env var in params — verify it fails with `UndefinedError` (or `SecurityError` if dunder access is attempted).
+  - Register a dynamic agent via API with `allowed_env_vars` empty — verify any env var reference fails with `UndefinedError`.
+  - Register a dynamic agent via API with `allowed_env_vars` containing `AWS_SECRET_ACCESS_KEY` — verify the template renders correctly.
+  - Register a dynamic agent via API with `allowed_env_vars` configured but a non-allowed env var referenced — verify it fails with `UndefinedError`.
 - **No e2e tests needed.**
 
 ## Open Questions
