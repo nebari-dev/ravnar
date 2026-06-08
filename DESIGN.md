@@ -120,24 +120,46 @@ for runtime agent registration (i.e., `RegisterAgentData`). It is **not** used f
 
 **Passing the context to runtime rendering:** `render_template` is called from Pydantic validators
 (`ImportStringWithParams._render_field_templates` and `_render_param_items`), which are class methods and do not receive
-request state directly. The `render_template_context` ContextVar bridges this gap: a FastAPI `yield` dependency on the
-dynamic agents routes sets the context variable before request body parsing.
+request state directly. The `render_template_context` ContextVar bridges this gap. A FastAPI `yield` dependency on the
+dynamic agents routes sets the context variable before request body parsing, using the `AgentHandler` instance that is
+already available in the router.
 
 ```python
-async def _set_restricted_template_context(config: Config = Depends(get_config)):
-    allowed_vars = config.agents.dynamic.allowed_env_vars
-    ctx = {k: v for k, v in os.environ.items() if k in allowed_vars}
-    render_template_context.set(ctx)
-    yield
+class AgentHandler:
+    def __init__(self, agent_config: AgentConfig) -> None:
+        self._static_agents: dict[str, Agent] = {id: factory() for id, factory in agent_config.static.items()}
+        self._dynamic_agents: dict[str, Agent] = {}
+        self._event_encoder = ag_ui.encoder.EventEncoder()
+        self._dynamic_enabled = agent_config.dynamic.enabled
+        self._dynamic_config = agent_config.dynamic
 
-# Applied to dynamic agents routes:
-@router.post("", dependencies=[Depends(_set_restricted_template_context)])
-async def register_agent(
-    data: RegisterAgentData,
-    user: User = Depends(authorized_user_with("agents:write")),
-) -> AgentInfo:
-    agent = data.agent()
-    ...
+    def get_dynamic_render_template_context(self) -> dict[str, str]:
+        allowed = self._dynamic_config.allowed_env_vars
+        return {k: v for k, v in os.environ.items() if k in allowed}
+```
+
+The `_make_dynamic_agents_router` function receives `agent_handler` by closure, so it can define the `yield` dependency
+inline without adding a new `Depends(get_config)`:
+
+```python
+def _make_dynamic_agents_router(
+    router: schema.APIRouter,
+    *,
+    agent_handler: AgentHandler,
+    authorized_user_with: Callable[..., Any],
+) -> None:
+    async def _set_restricted_template_context():
+        render_template_context.set(agent_handler.get_dynamic_render_template_context())
+        yield
+        render_template_context.set(None)
+
+    @router.post("", dependencies=[Depends(_set_restricted_template_context)])
+    async def register_agent(
+        data: RegisterAgentData,
+        user: User = Depends(authorized_user_with("agents:write")),
+    ) -> AgentInfo:
+        agent = data.agent()
+        ...
 ```
 
 The `yield` dependency runs before request body parsing. `render_template_context` is set, then Pydantic validators run
@@ -223,15 +245,82 @@ builtins, or other sandboxed operations. The handling depends on when the templa
 a `RAVNAR_*` environment variable, the server should crash at startup with a clear error. There is no legitimate reason
 for a config template to trigger a `SecurityError`.
 
-**Runtime agent registration** (`RegisterAgentData.agent` via API): `SecurityError` and `UndefinedError` must be
-**caught and converted to an HTTPException** (e.g., `400 Bad Request` or `422 Unprocessable Entity`) so the API client
+**Runtime restricted-context rendering** (`RegisterAgentData` via API, or any future feature that uses the restricted
+context): `SecurityError` and `UndefinedError` must be caught and converted to a client-friendly error so the API client
 receives a proper error response instead of an unhandled `500 Internal Server Error`.
 
-**Important:** The HTTPException response must use a **generic error message** (e.g., "Invalid agent configuration" or
-"Template rendering failed") to avoid leaking information about which environment variables are allowed, which are
-present, or which template syntax was rejected. The detailed error (including the variable name, the offending template,
-and the suggestion to add it to `agents.dynamic.allowed_env_vars`) is **logged server-side** with `structlog` at the
-`warning` level. The admin sees the detailed log message; the API client does not.
+Because Pydantic validators wrap every exception they catch in `ValidationError`, `HTTPException` raised from a validator
+would not reach FastAPI's `HTTPException` handler. Instead, the exception is trapped inside `RequestValidationError` →
+`422`. To avoid this, `ImportStringWithParams._render_template` catches `SecurityError`/`UndefinedError` and re-raises a
+custom `TemplateRenderError` when `render_template_context` is set (restricted context). The custom exception carries
+the relevant data (template, reason, message) so an exception handler can convert it to a `400 Bad Request` with a
+generic client-facing message while preserving the full details for server-side logging.
+
+```python
+# utils.py
+class TemplateRenderError(Exception):
+    """Raised when template rendering fails in a restricted context."""
+
+    def __init__(self, *, template: str, reason: str, message: str) -> None:
+        self.template = template
+        self.reason = reason
+        self.message = message
+        super().__init__(message)
+
+
+class ImportStringWithParams(BaseModel, Generic[T]):
+    @classmethod
+    def _render_template(cls, s: Any) -> Any:
+        ctx = render_template_context.get()
+        if ctx is None:
+            ctx = dict(os.environ)
+        try:
+            return render_template(s, ctx)
+        except (jinja2.exceptions.SecurityError, jinja2.exceptions.UndefinedError) as e:
+            if render_template_context.get() is not None:
+                structlog.get_logger().warning(
+                    "Template rendering blocked",
+                    template=str(s),
+                    reason=type(e).__name__,
+                    error=str(e),
+                )
+                raise TemplateRenderError(
+                    template=str(s),
+                    reason=type(e).__name__,
+                    message="Invalid configuration",
+                ) from e
+            raise
+```
+
+A FastAPI exception handler for `RequestValidationError` is added in `Ravnar._make_app`. It inspects the error list
+and, if any error is a `value_error` whose `ctx.error` is a `TemplateRenderError`, returns a `400 Bad Request` with a
+generic `{"detail": "Invalid configuration"}` response. The detailed error is logged server-side by the validator
+itself with `structlog` at the `warning` level. The admin sees the detailed log message; the API client does not.
+
+```python
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
+
+@app.exception_handler(RequestValidationError)
+async def _template_render_validation_handler(request, exc):
+    for error in exc.errors():
+        if error.get("type") == "value_error":
+            original = error.get("ctx", {}).get("error")
+            if isinstance(original, TemplateRenderError):
+                return JSONResponse(
+                    status_code=400,
+                    content={"detail": original.message},
+                )
+    return await request_validation_exception_handler(request, exc)
+```
+
+**Why this approach:**
+- The `_render_template` classmethod already knows whether it's in a restricted context because `render_template_context` is set.
+- It catches the exception, logs it with full context (`template`, `reason`, `error`), and replaces it with a distinct `TemplateRenderError`.
+- Pydantic wraps `TemplateRenderError` in a `ValidationError` with `type: "value_error"`, but the original exception lives in `ctx.error`.
+- The exception handler inspects `RequestValidationError.errors()` and looks for `TemplateRenderError` in `ctx.error`.
+- If found, it returns `400` (no `422`). Otherwise, it falls back to FastAPI's default validation handler.
+- The `TemplateRenderError` class has no agent-specific connotation — it is purely about template rendering — so it can be reused if other features introduce restricted-context rendering in the future.
 
 ### 5. Startup Logging
 
