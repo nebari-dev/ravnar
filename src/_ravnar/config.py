@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+from datetime import timedelta
 from pathlib import Path
 from typing import Any, Self, TypeVar
 
@@ -21,6 +22,18 @@ from .agents import Agent, DefaultAgent
 from .authenticators import Authenticator
 
 T = TypeVar("T")
+
+
+def normalize_hostname(host: str) -> str:
+    """Normalize a hostname to lowercase ASCII (punycode form).
+
+    Handles internationalized domain names by encoding them to
+    their IDNA2003 ASCII-compatible form. Pure-ASCII inputs are
+    lowercased and returned as-is.
+
+    Raises ValueError if the hostname is not valid IDNA.
+    """
+    return host.encode("idna").decode("ascii").lower()
 
 
 def interactive_session() -> bool:
@@ -73,10 +86,33 @@ def _local_storage() -> Path:
     return p
 
 
+class DatabaseConfig(BaseModel, RenderableMixin):
+    dsn: str = Field(default_factory=lambda: f"sqlite:///{_local_storage() / 'state.db'}")
+
+
+class URLDataSourceConfig(BaseModel, RenderableMixin):
+    enabled: bool = False
+    allowlist: list[str] = []
+    timeout: timedelta = timedelta(seconds=30)
+
+    @field_validator("allowlist", mode="after")
+    @classmethod
+    def _normalize_allowlist_entries(cls, v: list[str]) -> list[str]:
+        return [
+            entry if entry == "*" else normalize_hostname(entry)
+            for entry in v
+        ]
+
+
+class FileStorageConfig(BaseModel, RenderableMixin):
+    path: UPath = Field(default_factory=lambda: UPath(_local_storage() / "files"))
+    url_data_source: URLDataSourceConfig = Field(default_factory=URLDataSourceConfig)
+
+
 class StorageConfig(BaseModel, RenderableMixin):
     enabled: bool = True
-    database_dsn: str = Field(default_factory=lambda: f"sqlite:///{_local_storage() / 'state.db'}")
-    file_storage_path: UPath = Field(default_factory=lambda: UPath(_local_storage() / "files"))
+    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
+    files: FileStorageConfig = Field(default_factory=FileStorageConfig)
 
 
 class DynamicAgentConfig(BaseModel, RenderableMixin):
