@@ -56,7 +56,7 @@ class DatabaseConfig(BaseModel):
 class URLDataSourceConfig(BaseModel):
     enabled: bool = False
     allowlist: list[str] = []
-    timeout_seconds: int = 30
+    timeout: timedelta = timedelta(seconds=30)
 
 class FileStorageConfig(BaseModel):
     path: UPath = ...
@@ -77,8 +77,8 @@ class StorageConfig(BaseModel):
 | Property | Type | Default | Description |
 |---|---|---|---|
 | `enabled` | `bool` | `false` | When false, any file source with `type: url` returns a 400 error. |
-| `allowlist` | `list[str]` | `[]` | Case-insensitive domain list. Only URLs whose hostname matches an entry (or is a subdomain of an entry) are permitted. When empty and `enabled` is true, all URLs are rejected. Each entry is normalized via the IDNA punycode encoder before storage. |
-| `timeout_seconds` | `int` | `30` | Per-request timeout for DNS + connect + read of the URL fetch. |
+| `allowlist` | `list[str]` | `[]` | Case-insensitive domain list. Only URLs whose hostname matches an entry (or is a subdomain of an entry) are permitted. When empty and `enabled` is true, all URLs are rejected. The sentinel value `"*"` (as the sole entry) allows all hostnames — same pattern as Starlette's `CORSMiddleware.allowed_origins`. Each entry is normalized via the IDNA punycode encoder before comparison. |
+| `timeout` | `timedelta` | `30s` | Per-request timeout applied to each individual HTTP request in the redirect chain. Pydantic accepts `int` (seconds), `"30s"`, `"0.5m"`, etc. The total worst-case time for a chain is `timeout × max_redirects` (default 20). |
 
 ##### Example YAML
 
@@ -94,7 +94,7 @@ storage:
       allowlist:
         - "raw.githubusercontent.com"
         - "github.com"
-      timeout_seconds: 30
+      timeout: 30
 ```
 
 ### 2. IDNA / Punycode Normalization Helper
@@ -151,6 +151,10 @@ async def _validate_url(self, url: str) -> str:
     if not config.allowlist:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="URL fetch not allowed")
 
+    # Wildcard sentinel — same pattern as Starlette CORSMiddleware
+    if "*" in config.allowlist:
+        return url
+
     allowed = False
     for entry in config.allowlist:
         entry_norm = normalize_hostname(entry)
@@ -179,8 +183,10 @@ Set `follow_redirects=False` on the `httpx.AsyncClient` and implement a manual r
 2. If the response is a redirect (3xx with a `Location` header), extract the redirect target URL.
 3. Validate the target URL through `_validate_url`.
 4. Issue a new GET request to the validated target.
-5. Repeat up to a maximum of 20 redirects (httpx default).
+5. Repeat up to a maximum of 20 redirects.
 6. On success, proceed with content extraction as before.
+
+Each request in the loop gets its own full `timeout` budget (per-request, not cumulative across the chain). The max redirect count bounds the total worst-case time to `timeout × 20`.
 
 This approach ensures **every hop** in a redirect chain is validated against the allowlist. An allowlisted domain cannot redirect to an internal IP without being caught.
 
