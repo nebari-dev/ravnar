@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import TYPE_CHECKING, cast
 
 import ag_ui.core
 import ag_ui.encoder
 import fastsse
-from fastapi import FastAPI, HTTPException, status
+import structlog
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from opentelemetry import trace
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
@@ -18,7 +22,7 @@ from _ravnar.events import EventProcessor
 from _ravnar.mixin import SetupTeardownMixin
 from _ravnar.observability import configure_logging, configure_tracing
 from _ravnar.security import SecurityHeadersMiddleware, make_authorized_user_factory
-from _ravnar.utils import as_awaitable
+from _ravnar.utils import TemplateRenderError, as_awaitable
 
 from .api import make_router as make_api_router
 from .config import AgentConfig, BaseConfig, Config
@@ -74,6 +78,24 @@ class Ravnar:
         async def version() -> str:
             return __version__
 
+        @app.exception_handler(RequestValidationError)
+        async def _template_render_validation_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+            for error in exc.errors():
+                if error.get("type") == "value_error":
+                    original = error.get("ctx", {}).get("error")
+                    if isinstance(original, TemplateRenderError):
+                        structlog.get_logger().warning(
+                            "Template rendering blocked",
+                            template=original.template,
+                            reason=original.reason,
+                            error=str(original.__cause__),
+                        )
+                        return JSONResponse(
+                            status_code=400,
+                            content={"detail": original.message},
+                        )
+            return await request_validation_exception_handler(request, exc)
+
         app.include_router(
             make_api_router(
                 storage_config=config.storage,
@@ -111,6 +133,11 @@ class AgentHandler(SetupTeardownMixin):
         self._dynamic_agents: dict[str, Agent] = {}
         self._event_encoder = ag_ui.encoder.EventEncoder()
         self._dynamic_enabled = agent_config.dynamic.enabled
+        self._dynamic_config = agent_config.dynamic
+
+    def get_dynamic_render_template_context(self) -> dict[str, str]:
+        allowed = self._dynamic_config.allowed_env_vars
+        return {k: v for k, v in os.environ.items() if k in allowed}
 
     @staticmethod
     async def _setup_agent(agent: Agent) -> None:

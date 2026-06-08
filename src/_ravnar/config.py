@@ -31,7 +31,7 @@ class RenderableMixin:
     @field_validator("*", mode="before")
     @classmethod
     def _render_templates(cls, data: Any) -> Any:
-        return render_template(data)
+        return render_template(data, context=dict(os.environ))
 
 
 class LoggingConfig(BaseModel, RenderableMixin):
@@ -81,6 +81,7 @@ class StorageConfig(BaseModel, RenderableMixin):
 
 class DynamicAgentConfig(BaseModel, RenderableMixin):
     enabled: bool = False
+    allowed_env_vars: list[str] = Field(default_factory=list)
 
 
 class AgentConfig(BaseModel, RenderableMixin):

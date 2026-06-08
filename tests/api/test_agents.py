@@ -1,3 +1,5 @@
+import os
+
 import compyre
 import pydantic
 import pytest
@@ -5,8 +7,18 @@ from fastapi import status
 
 import ravnar.agents
 from _ravnar import schema
+from _ravnar.agents import Agent
 from _ravnar.config import BaseConfig
 from tests.utils import HeaderAuthenticator, make_app_client
+
+
+class MockAgent(Agent):
+    def __init__(self, param="unset"):
+        self.param = param
+
+    async def run(self, input):
+        raise AssertionError
+        yield
 
 
 def make_config(*, dynamic_enabled=False):
@@ -203,3 +215,79 @@ class TestDynamicAgentsEnabled:
 
         response = client.delete("/api/agents/delete-twice")
         assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_register_agent_with_env_var_default_deny(self, client):
+        response = client.post(
+            "/api/agents",
+            json={
+                "id": "env-agent",
+                "agent": {
+                    "cls_or_fn": f"tests.api.test_agents.{MockAgent.__name__}",
+                    "params": {"param": "{{ HOME }}"},
+                },
+            },
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.json()["detail"] == "Invalid configuration"
+
+    def test_register_agent_with_sandbox_escape(self, client):
+        response = client.post(
+            "/api/agents",
+            json={
+                "id": "sandbox-agent",
+                "agent": {
+                    "cls_or_fn": f"tests.api.test_agents.{MockAgent.__name__}",
+                    "params": {"param": "{{ ''.__class__ }}"},
+                },
+            },
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.json()["detail"] == "Invalid configuration"
+
+
+class TestDynamicAgentsWithAllowedEnvVars:
+    @pytest.fixture
+    def client(self, mocker):
+        mocker.patch.dict(os.environ, {"ALLOWED_VAR": "allowed_value", "DENIED_VAR": "denied_value"})
+        with make_app_client(
+            BaseConfig.model_validate(
+                {
+                    "agents": {
+                        "static": {
+                            "default": {"cls_or_fn": "ravnar.agents.DefaultAgent"},
+                        },
+                        "dynamic": {"enabled": True, "allowed_env_vars": ["ALLOWED_VAR"]},
+                    },
+                }
+            )
+        ) as c:
+            yield c
+
+    def test_register_agent_with_allowed_env_var(self, client):
+        response = client.post(
+            "/api/agents",
+            json={
+                "id": "allowed-env-agent",
+                "agent": {
+                    "cls_or_fn": f"tests.api.test_agents.{MockAgent.__name__}",
+                    "params": {"param": "{{ ALLOWED_VAR }}"},
+                },
+            },
+        )
+        assert response.status_code == status.HTTP_200_OK
+        info = schema.AgentInfo.model_validate_json(response.content)
+        assert info.id == "allowed-env-agent"
+
+    def test_register_agent_with_denied_env_var(self, client):
+        response = client.post(
+            "/api/agents",
+            json={
+                "id": "denied-env-agent",
+                "agent": {
+                    "cls_or_fn": f"tests.api.test_agents.{MockAgent.__name__}",
+                    "params": {"param": "{{ DENIED_VAR }}"},
+                },
+            },
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.json()["detail"] == "Invalid configuration"
