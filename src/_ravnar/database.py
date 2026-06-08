@@ -5,7 +5,7 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Collection
 from contextlib import AbstractAsyncContextManager, AbstractContextManager
 from math import ceil
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import HTTPException, status
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
@@ -23,14 +23,17 @@ from .mixin import SetupTeardownMixin
 from .observability import traced
 from .utils import as_async_context_manager, as_awaitable, now
 
+if TYPE_CHECKING:
+    from _ravnar.config import DatabaseConfig
+
 
 class SessionFactoryParams(TypedDict):
     expire_on_commit: bool
 
 
 class Database(SetupTeardownMixin):
-    def __init__(self, url: str) -> None:
-        url = make_url(url)
+    def __init__(self, config: DatabaseConfig) -> None:
+        url = make_url(config.dsn)
 
         if url.drivername.startswith("sqlite") and (url.database is None or url.database == ":memory:"):
             # See https://docs.sqlalchemy.org/en/20/dialects/sqlite.html#using-a-memory-database-in-multiple-threads

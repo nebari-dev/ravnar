@@ -201,3 +201,7 @@ class ImportStringWithParams(BaseModel, Generic[T]):
                     return v
 
         return self.cls_or_fn(**{k: call(v) for k, v in self.params.items()})
+
+
+def normalize_hostname(host: str) -> str:
+    return host.encode("idna").decode("ascii").lower()

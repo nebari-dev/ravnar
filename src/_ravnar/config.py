@@ -7,33 +7,16 @@ from pathlib import Path
 from typing import Any, Self, TypeVar
 
 import l2sl
-from pydantic import (
-    BaseModel,
-    Field,
-    field_validator,
-    model_validator,
-)
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict, YamlConfigSettingsSource
 from upath import UPath
 
-from _ravnar.utils import ImportStringWithParams, render_template
+from _ravnar.utils import ImportStringWithParams, normalize_hostname, render_template
 
 from .agents import Agent, DefaultAgent
 from .authenticators import Authenticator
 
 T = TypeVar("T")
-
-
-def normalize_hostname(host: str) -> str:
-    """Normalize a hostname to lowercase ASCII (punycode form).
-
-    Handles internationalized domain names by encoding them to
-    their IDNA2003 ASCII-compatible form. Pure-ASCII inputs are
-    lowercased and returned as-is.
-
-    Raises ValueError if the hostname is not valid IDNA.
-    """
-    return host.encode("idna").decode("ascii").lower()
 
 
 def interactive_session() -> bool:
@@ -98,10 +81,14 @@ class URLDataSourceConfig(BaseModel, RenderableMixin):
     @field_validator("allowlist", mode="after")
     @classmethod
     def _normalize_allowlist_entries(cls, v: list[str]) -> list[str]:
-        return [
-            entry if entry == "*" else normalize_hostname(entry)
-            for entry in v
-        ]
+        if "*" in v:
+            if len(v) > 1:
+                raise ValueError(
+                    'Wildcard "*" must be the sole allowlist entry. It cannot be combined with specific domains.'
+                )
+        else:
+            v = [normalize_hostname(entry) for entry in v]
+        return v
 
 
 class FileStorageConfig(BaseModel, RenderableMixin):

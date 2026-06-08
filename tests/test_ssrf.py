@@ -3,13 +3,12 @@ from __future__ import annotations
 import urllib.parse
 from datetime import timedelta
 
-import httpx
+import pydantic
 import pytest
-import pytest_httpserver
 from fastapi import HTTPException, status
 
-import pydantic
-from _ravnar.config import URLDataSourceConfig, FileStorageConfig, normalize_hostname
+from _ravnar.config import URLDataSourceConfig, normalize_hostname
+from _ravnar.file_storage import FileHandler
 
 
 class TestNormalizeHostname:
@@ -45,6 +44,11 @@ class TestURLDataSourceConfig:
         config = URLDataSourceConfig(allowlist=["*"])
         assert config.allowlist == ["*"]
 
+    def test_wildcard_with_others_blocked(self) -> None:
+        with pytest.raises(pydantic.ValidationError) as exc_info:
+            URLDataSourceConfig(allowlist=["*", "example.com"])
+        assert "must be the sole" in str(exc_info.value)
+
     def test_invalid_allowlist_entry_raises(self) -> None:
         # Double dot creates an empty label which is invalid in IDNA
         with pytest.raises(pydantic.ValidationError):
@@ -59,104 +63,86 @@ class TestURLDataSourceConfig:
         assert config.enabled is False
 
 
-def _make_handler(url_data_source_config: URLDataSourceConfig | None = None):
-    """Create a FileHandler with the given URL data source config for testing."""
-    from _ravnar.file_storage import FileHandler
-
-    file_storage_config = FileStorageConfig(
-        url_data_source=url_data_source_config or URLDataSourceConfig(enabled=True, allowlist=["example.com"])
-    )
-    handler = FileHandler.__new__(FileHandler)
-    handler._file_storage_config = file_storage_config
-    return handler
-
-
 class TestValidateURL:
-    def test_not_enabled(self) -> None:
-        handler = _make_handler(URLDataSourceConfig(enabled=False))
-        with pytest.raises(HTTPException) as exc_info:
-            handler._validate_url("http://example.com/file")
-        assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
-        assert "URL file source is not enabled" in exc_info.value.detail
+    """Tests for FileHandler._validate_url (a sync @staticmethod)."""
 
-    def test_empty_allowlist_blocks_all(self) -> None:
-        handler = _make_handler(URLDataSourceConfig(enabled=True, allowlist=[]))
+    def test_not_enabled(self) -> None:
+        """URL source not enabled is checked in _extract_url, not _validate_url.
+
+        _validate_url only validates the hostname against the allowlist.
+        When allowlist is empty, all URLs are rejected.
+        """
+        allowlist: list[str] = []
         with pytest.raises(HTTPException) as exc_info:
-            handler._validate_url("http://example.com/file")
+            FileHandler._validate_url("http://example.com/file", allowlist=allowlist)
         assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
 
     def test_exact_match(self) -> None:
-        handler = _make_handler()
-        result = handler._validate_url("http://example.com/file")
+        result = FileHandler._validate_url("http://example.com/file", allowlist=["example.com"])
         assert result == "http://example.com/file"
 
     def test_subdomain_match(self) -> None:
-        handler = _make_handler(URLDataSourceConfig(enabled=True, allowlist=["example.com"]))
-        result = handler._validate_url("http://sub.example.com/file")
+        result = FileHandler._validate_url("http://sub.example.com/file", allowlist=["example.com"])
         assert result == "http://sub.example.com/file"
 
     def test_case_insensitive_match(self) -> None:
-        handler = _make_handler(URLDataSourceConfig(enabled=True, allowlist=["EXAMPLE.COM"]))
-        result = handler._validate_url("http://example.com/file")
+        # Allowlist entry is already normalized (lowercased) at config load time
+        result = FileHandler._validate_url("http://example.com/file", allowlist=["example.com"])
         assert result == "http://example.com/file"
 
     def test_non_match(self) -> None:
-        handler = _make_handler(URLDataSourceConfig(enabled=True, allowlist=["example.com"]))
         with pytest.raises(HTTPException) as exc_info:
-            handler._validate_url("http://evil.com/file")
+            FileHandler._validate_url("http://evil.com/file", allowlist=["example.com"])
         assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
 
     def test_wildcard_allows_all(self) -> None:
-        handler = _make_handler(URLDataSourceConfig(enabled=True, allowlist=["*"]))
-        result = handler._validate_url("http://evil.com/file")
+        result = FileHandler._validate_url("http://evil.com/file", allowlist=["*"])
         assert result == "http://evil.com/file"
 
     def test_wildcard_allows_internal(self) -> None:
-        handler = _make_handler(URLDataSourceConfig(enabled=True, allowlist=["*"]))
-        result = handler._validate_url("http://169.254.169.254/latest/meta-data/")
+        result = FileHandler._validate_url("http://169.254.169.254/latest/meta-data/", allowlist=["*"])
         assert result == "http://169.254.169.254/latest/meta-data/"
 
     def test_url_with_userinfo(self) -> None:
-        handler = _make_handler()
-        result = handler._validate_url("http://user:pass@example.com/file")
+        result = FileHandler._validate_url("http://user:pass@example.com/file", allowlist=["example.com"])
         assert result == "http://user:pass@example.com/file"
 
     def test_url_with_non_standard_port(self) -> None:
-        handler = _make_handler()
-        result = handler._validate_url("http://example.com:8080/file")
+        result = FileHandler._validate_url("http://example.com:8080/file", allowlist=["example.com"])
         assert result == "http://example.com:8080/file"
 
     def test_hostname_trailing_dot_not_matching(self) -> None:
-        handler = _make_handler(URLDataSourceConfig(enabled=True, allowlist=["example.com"]))
         with pytest.raises(HTTPException) as exc_info:
-            handler._validate_url("http://example.com./file")
+            FileHandler._validate_url("http://example.com./file", allowlist=["example.com"])
         assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
 
     def test_ip_literal_not_in_allowlist(self) -> None:
-        handler = _make_handler(URLDataSourceConfig(enabled=True, allowlist=["example.com"]))
         with pytest.raises(HTTPException) as exc_info:
-            handler._validate_url("http://93.184.216.34/file")
+            FileHandler._validate_url("http://93.184.216.34/file", allowlist=["example.com"])
         assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
 
     def test_ip_literal_in_allowlist(self) -> None:
-        handler = _make_handler(URLDataSourceConfig(enabled=True, allowlist=["93.184.216.34"]))
-        result = handler._validate_url("http://93.184.216.34/file")
+        result = FileHandler._validate_url("http://93.184.216.34/file", allowlist=["93.184.216.34"])
         assert result == "http://93.184.216.34/file"
 
     def test_url_with_no_hostname(self) -> None:
-        handler = _make_handler()
         with pytest.raises(HTTPException) as exc_info:
-            handler._validate_url("file:///etc/passwd")
+            FileHandler._validate_url("file:///etc/passwd", allowlist=["example.com"])
         assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
 
     def test_idn_hostname_matching_idn_entry(self) -> None:
-        handler = _make_handler(URLDataSourceConfig(enabled=True, allowlist=["münchen.example.com"]))
-        result = handler._validate_url("http://MÜNCHEN.example.com/file")
+        # Config normalizes the IDN allowlist entry at load time
+        result = FileHandler._validate_url(
+            "http://MÜNCHEN.example.com/file",
+            allowlist=["xn--mnchen-3ya.example.com"],
+        )
         assert result == "http://MÜNCHEN.example.com/file"
 
     def test_idn_hostname_matching_punycode_entry(self) -> None:
-        handler = _make_handler(URLDataSourceConfig(enabled=True, allowlist=["xn--mnchen-3ya.example.com"]))
-        result = handler._validate_url("http://MÜNCHEN.example.com/file")
+        result = FileHandler._validate_url(
+            "http://MÜNCHEN.example.com/file",
+            allowlist=["xn--mnchen-3ya.example.com"],
+        )
         assert result == "http://MÜNCHEN.example.com/file"
 
 
@@ -165,8 +151,8 @@ class TestValidateURLIntegration:
 
     @pytest.fixture
     def app_client(self, httpserver):
-        from tests.utils import TestClient
         from _ravnar.config import BaseConfig
+        from tests.utils import TestClient
 
         hostname = urllib.parse.urlparse(httpserver.url_for("/")).hostname or "localhost"
         config = BaseConfig.model_validate(
@@ -201,7 +187,6 @@ class TestValidateURLIntegration:
         assert response.status_code == 200
 
     def test_upload_from_non_allowlisted_url_fails(self, app_client, httpserver):
-        # Point to a URL on a non-allowlisted host
         response = app_client.post(
             "/api/files",
             json={
@@ -212,9 +197,8 @@ class TestValidateURLIntegration:
         assert response.status_code == 400
 
     def test_url_source_disabled_fails(self, app_client, httpserver):
-        """Override fixture to disable URL source."""
-        from tests.utils import TestClient
         from _ravnar.config import BaseConfig
+        from tests.utils import TestClient
 
         config = BaseConfig.model_validate(
             {
