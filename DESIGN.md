@@ -151,7 +151,6 @@ def _make_dynamic_agents_router(
     async def _set_restricted_template_context():
         render_template_context.set(agent_handler.get_dynamic_render_template_context())
         yield
-        render_template_context.set(None)
 
     @router.post("", dependencies=[Depends(_set_restricted_template_context)])
     async def register_agent(
@@ -164,13 +163,9 @@ def _make_dynamic_agents_router(
 
 The `yield` dependency runs before request body parsing. `render_template_context` is set, then Pydantic validators run
 and call `ImportStringWithParams._render_template`, which reads the ContextVar and receives the restricted context.
-After the response is generated, the `yield` resumes and clears the context.
-
-**Why clear the context?** FastAPI `yield` dependencies are context managers — the code after `yield` runs as cleanup.
-While each request runs in its own asyncio task (so the ContextVar would naturally be garbage collected), resetting it
-via `set(None)` is defensive and explicit. It prevents stale state if the task is reused (e.g., in some async frameworks
-or test scenarios) and follows the `yield` dependency pattern expected by FastAPI developers. For startup config,
-`render_template_context` is not set, so `ImportStringWithParams._render_template` falls back to the full `os.environ`.
+After the response is generated, the `yield` dependency exits. Each request runs in its own asyncio task, so the
+ContextVar is naturally garbage collected. For startup config, `render_template_context` is not set, so
+`ImportStringWithParams._render_template` falls back to the full `os.environ`.
 
 **Why default-deny:** The attack model is a user with `agents:write` registering an agent that exfiltrates arbitrary env
 vars via `getCapabilities()`. The admin controls the ravnar config file (or deployment configuration), so they can
@@ -278,12 +273,6 @@ class ImportStringWithParams(BaseModel, Generic[T]):
             return render_template(s, ctx)
         except (jinja2.exceptions.SecurityError, jinja2.exceptions.UndefinedError) as e:
             if render_template_context.get() is not None:
-                structlog.get_logger().warning(
-                    "Template rendering blocked",
-                    template=str(s),
-                    reason=type(e).__name__,
-                    error=str(e),
-                )
                 raise TemplateRenderError(
                     template=str(s),
                     reason=type(e).__name__,
@@ -293,9 +282,9 @@ class ImportStringWithParams(BaseModel, Generic[T]):
 ```
 
 A FastAPI exception handler for `RequestValidationError` is added in `Ravnar._make_app`. It inspects the error list
-and, if any error is a `value_error` whose `ctx.error` is a `TemplateRenderError`, returns a `400 Bad Request` with a
-generic `{"detail": "Invalid configuration"}` response. The detailed error is logged server-side by the validator
-itself with `structlog` at the `warning` level. The admin sees the detailed log message; the API client does not.
+and, if any error is a `value_error` whose `ctx.error` is a `TemplateRenderError`, logs the full details server-side
+with `structlog` at the `warning` level and returns a `400 Bad Request` with a generic `{"detail": "Invalid configuration"}`
+response. The admin sees the detailed log message; the API client does not.
 
 ```python
 from fastapi.exception_handlers import request_validation_exception_handler
@@ -307,6 +296,12 @@ async def _template_render_validation_handler(request, exc):
         if error.get("type") == "value_error":
             original = error.get("ctx", {}).get("error")
             if isinstance(original, TemplateRenderError):
+                structlog.get_logger().warning(
+                    "Template rendering blocked",
+                    template=original.template,
+                    reason=original.reason,
+                    error=str(original.__cause__),
+                )
                 return JSONResponse(
                     status_code=400,
                     content={"detail": original.message},
@@ -316,10 +311,10 @@ async def _template_render_validation_handler(request, exc):
 
 **Why this approach:**
 - The `_render_template` classmethod already knows whether it's in a restricted context because `render_template_context` is set.
-- It catches the exception, logs it with full context (`template`, `reason`, `error`), and replaces it with a distinct `TemplateRenderError`.
+- It catches the exception and replaces it with a distinct `TemplateRenderError` that carries the relevant data.
 - Pydantic wraps `TemplateRenderError` in a `ValidationError` with `type: "value_error"`, but the original exception lives in `ctx.error`.
 - The exception handler inspects `RequestValidationError.errors()` and looks for `TemplateRenderError` in `ctx.error`.
-- If found, it returns `400` (no `422`). Otherwise, it falls back to FastAPI's default validation handler.
+- If found, it logs the full details and returns `400` (no `422`). Otherwise, it falls back to FastAPI's default validation handler.
 - The `TemplateRenderError` class has no agent-specific connotation — it is purely about template rendering — so it can be reused if other features introduce restricted-context rendering in the future.
 
 ### 5. Startup Logging
