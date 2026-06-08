@@ -2,7 +2,7 @@
 
 ## Summary
 
-Replace the unrestricted `jinja2.Environment` used in config template rendering with `jinja2.sandbox.SandboxedEnvironment`, and restrict the template context to a whitelisted subset of environment variables instead of exposing all of `os.environ`.
+Replace the unrestricted `jinja2.Environment` used in config template rendering with `jinja2.sandbox.SandboxedEnvironment`. For **startup config rendering**, use the full `os.environ` with `StrictUndefined` to catch typos. For **runtime agent registration** (dynamic agents via API), use a restricted whitelist of environment variables to prevent a privilege-escalation exfiltration attack where a user with `agents:write` permission reads arbitrary secrets via `getCapabilities()`.
 
 ## Goals
 
@@ -34,9 +34,9 @@ The current code has two problems:
 
 1. **No sandbox:** `jinja2.Environment()` is the standard environment, which allows access to Python builtins through the template sandbox escape technique (`{{ config.__class__.__init__.__globals__ }}`). While this requires an attacker to control a config value or env var, the lack of sandboxing means a single bypass of config-file protection leads to code execution.
 
-2. **Full environment exposure:** `os.environ` is passed as the template context. This includes all environment variables, not just ravnar-specific ones. An attacker who can influence any env var can reference it in a template. More importantly, the full environment is more surface area for potential escape vectors through Jinja2's interaction with dict-like objects.
+2. **Runtime exfiltration via dynamic agents:** A user with `agents:write` permission can register an agent whose parameters contain template expressions like `{{ AWS_SECRET_ACCESS_KEY }}`. The template renders during `ImportStringWithParams` validation, substituting the secret into the agent's config. The agent's `getCapabilities()` returns this value, and the user can read it via `GET /api/agents` (requires only `agents:read`, a standard permission). This is a privilege escalation: a write-scoped attacker exfiltrates read-scoped secrets from the environment.
 
-The fix uses `SandboxedEnvironment` and a restricted context, making template-based code execution practically impossible without a Jinja2 sandbox escape vulnerability being discovered and unpatched.
+The fix uses `SandboxedEnvironment` for all rendering, with a restricted context only for runtime agent registration. This blocks code execution in all cases and prevents the exfiltration attack while preserving the UX of full env-var access for legitimate config file authoring.
 
 ## Design
 
@@ -48,10 +48,16 @@ Replace `jinja2.Environment()` with `jinja2.sandbox.SandboxedEnvironment(undefin
 import jinja2
 import jinja2.sandbox
 
-def render_template(s: Any) -> Any:
+def render_template(s: Any, *, context: dict[str, str] | None = None) -> Any:
     if isinstance(s, str):
         env = jinja2.sandbox.SandboxedEnvironment(undefined=jinja2.StrictUndefined)
-        return env.from_string(s).render(**context)
+        ctx = context if context is not None else dict(os.environ)
+        return env.from_string(s).render(**ctx)
+    if isinstance(s, dict):
+        return {render_template(k, context=context): render_template(v, context=context) for k, v in s.items()}
+    if isinstance(s, list):
+        return [render_template(v, context=context) for v in s]
+    return s
 ```
 
 `SandboxedEnvironment` blocks access to:
@@ -59,13 +65,15 @@ def render_template(s: Any) -> Any:
 - Built-in functions (`eval`, `exec`, `open`, `import`, etc.)
 - Methods flagged as unsafe (`__call__` on callables that are not explicitly safe)
 
-`StrictUndefined` raises `UndefinedError` if any variable referenced in a template is missing from the context. This means non-whitelisted environment variables will cause a hard failure at startup, rather than silently rendering as empty strings.
+`StrictUndefined` raises `UndefinedError` if any variable referenced in a template is missing from the context. This prevents silent misconfigurations caused by typos or missing env vars.
 
-This is the standard mitigation recommended by Jinja2's own documentation for security-sensitive applications. Combined with `StrictUndefined`, it provides defense in depth: the sandbox blocks code execution, and the strict undefined handling prevents silent misconfigurations caused by the restricted context.
+The `context` parameter controls which environment variables are exposed to the template. When `None` (default), the full `os.environ` is used. This is the behavior for startup config rendering.
 
-### 2. Restricted Context
+This is the standard mitigation recommended by Jinja2's own documentation for security-sensitive applications. Combined with `StrictUndefined`, it blocks code execution and prevents silent misconfigurations.
 
-Instead of passing all of `os.environ`, construct a dict with a whitelist of environment variables:
+### 2. Restricted Context (Runtime Only)
+
+For runtime agent registration, construct a restricted context dict with a whitelist of environment variables:
 
 ```python
 _ALLOWED_ENV_VARS = frozenset({
@@ -75,37 +83,41 @@ _ALLOWED_ENV_VARS = frozenset({
     # All RAVNAR_* variables
 })
 
-def _build_template_context() -> dict[str, str]:
+def _build_restricted_template_context() -> dict[str, str]:
     return {
         k: v for k, v in os.environ.items()
         if k in _ALLOWED_ENV_VARS or k.startswith("RAVNAR_")
     }
 ```
 
+This restricted context is **only** passed to `render_template` during `ImportStringWithParams` validation for runtime agent registration (i.e., `RegisterAgentData`). It is **not** used for startup config rendering.
+
 This ensures:
 - All `RAVNAR_*` variables are available (these are the intended variables for configuring ravnar).
 - Common system variables like `HOME`, `USER`, `HOSTNAME` are available (they are commonly referenced in config paths).
 - All other environment variables (e.g., `AWS_*`, `DB_*`, `SECRET_*`, `PATH` — wait, `PATH` is explicitly allowed above) are not exposed.
 
-The whitelist should be documented in the hardening guide. Users who need additional env vars in templates can request additions through a code change rather than via configuration (since the whitelist is a code constant, not a config item, to prevent self-defeat).
+The whitelist should be documented in the hardening guide. Users who need additional env vars in dynamic agent templates can request additions through a code change rather than via configuration (since the whitelist is a code constant, not a config item, to prevent self-defeat).
 
-**Note:** Because `StrictUndefined` is used, any template referencing a non-whitelisted env var will raise `UndefinedError` at startup. Users who previously relied on non-whitelisted env vars must either prefix them with `RAVNAR_` or add them to the whitelist. For conditional values, use the `default` filter (`{{ VAR | default("fallback") }}`) or the `is defined` test (`{% if VAR is defined %}...{% endif %}`) instead of `if VAR else`, which evaluates the variable in boolean context and triggers `UndefinedError`.
+**Note:** Because `StrictUndefined` is used, any template referencing a non-whitelisted env var will raise `UndefinedError` at runtime. For conditional values, use the `default` filter (`{{ VAR | default("fallback") }}`) or the `is defined` test (`{% if VAR is defined %}...{% endif %}`) instead of `if VAR else`, which evaluates the variable in boolean context and triggers `UndefinedError`.
 
 ### 3. Dict Key Rendering
 
 The function `ImportStringWithParams._render_param_items` currently calls `render_template()` on both keys and values of the params dict:
 
 ```python
-return {render_template(k): render_template(v) for k, v in params.items()}
+return {render_template(k, context=context): render_template(v, context=context) for k, v in params.items()}
 ```
 
 This means env-var-derived strings can also be parameter names. With the sandboxing change this is less dangerous, but it is still surprising behavior. The fix here is narrower: only render keys if they are strings containing template syntax (`{{` or `{%`). A simpler approach is to apply `render_template` to all string keys as before — the sandboxing is the real defense, and changing key-rendering behavior could break someone who relies on it (unlikely but possible). **Decision: leave key rendering as-is, since sandboxing covers the risk.**
+
+`ImportStringWithParams._render_field_templates` and `_render_param_items` must pass the restricted context when called during runtime agent registration. For startup config rendering, `RenderableMixin._render_templates` already pre-renders values with the full `os.environ` context, so the `ImportStringWithParams` validators will receive plain strings (mostly no-op).
 
 ### 4. SecurityError Handling
 
 `SandboxedEnvironment` raises `jinja2.exceptions.SecurityError` when a template attempts dunder access, dangerous builtins, or other sandboxed operations. The handling depends on when the template is rendered:
 
-**Startup config rendering** (`RenderableMixin`, `ImportStringWithParams` during model validation): `SecurityError` must **propagate** (fail-closed). If a malicious or malformed template is present in the YAML config or a `RAVNAR_*` environment variable, the server should crash at startup with a clear error. There is no legitimate reason for a config template to trigger a `SecurityError`.
+**Startup config rendering** (`RenderableMixin`, `ImportStringWithParams` during startup model validation): `SecurityError` must **propagate** (fail-closed). If a malicious or malformed template is present in the YAML config or a `RAVNAR_*` environment variable, the server should crash at startup with a clear error. There is no legitimate reason for a config template to trigger a `SecurityError`.
 
 **Runtime agent registration** (`RegisterAgentData.agent` via API): `SecurityError` must be **caught and converted to an HTTPException** (e.g., `400 Bad Request` or `422 Unprocessable Entity`) so the API client receives a proper error response instead of an unhandled `500 Internal Server Error`. The error message should indicate that the template contains disallowed content.
 
@@ -130,12 +142,16 @@ No explicit warning is added for the sandboxing change — it is a silent fix. N
   - Render `{{ config.__class__ }}` → raises `SecurityError` (fail-closed at startup, converted to HTTPException at runtime).
   - Render `{{ self.__class__.__mro__ }}` → raises `SecurityError`.
   - Render `{{ ''.__class__.__mro__ }}` → raises `SecurityError`.
-- **Unit tests for restricted context:**
-  - Env vars in the whitelist are accessible.
-  - Env vars not in the whitelist raise `UndefinedError` (fail-closed).
+- **Unit tests for restricted context (runtime only):**
+  - Env vars in the whitelist are accessible during runtime agent registration.
+  - Env vars not in the whitelist raise `UndefinedError` during runtime agent registration.
   - `RAVNAR_*` vars are all accessible regardless of whitelist membership.
   - `StrictUndefined` tests: `{{ VAR | default("x") }}` → `"x"`; `{% if VAR is defined %}...{% endif %}` → renders fallback; `{{ VAR if VAR else "x" }}` → `UndefinedError`.
-- **Integration tests:** Start ravnar with a config that uses `{{ HOME }}` in a path — verify the path resolves correctly. Start ravnar with a config that uses a non-whitelisted env var (e.g., `{{ MY_SECRET }}`) — verify that startup fails with `UndefinedError`.
+- **Integration tests:**
+  - Start ravnar with a config that uses `{{ HOME }}` in a path — verify the path resolves correctly.
+  - Start ravnar with a config that uses an arbitrary env var (e.g., `{{ MY_SECRET }}`) — verify the path resolves correctly (full context is available for config).
+  - Register a dynamic agent via API with a whitelisted env var in params — verify it succeeds.
+  - Register a dynamic agent via API with a non-whitelisted env var in params — verify it fails with `UndefinedError` (or `SecurityError` if dunder access is attempted).
 - **No e2e tests needed.**
 
 ## Open Questions
