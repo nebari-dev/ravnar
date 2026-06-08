@@ -8,7 +8,7 @@ import fastsse
 from fastapi import Depends, Path
 
 from _ravnar import schema
-from _ravnar.auth import User
+from _ravnar.security import User
 
 if TYPE_CHECKING:
     from _ravnar.core import AgentHandler

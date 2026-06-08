@@ -14,11 +14,10 @@ from opentelemetry import trace
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 from _ravnar import schema
-from _ravnar.auth import make_authorized_user_factory
 from _ravnar.events import EventProcessor
 from _ravnar.mixin import SetupTeardownMixin
 from _ravnar.observability import configure_logging, configure_tracing
-from _ravnar.security_headers_middleware import SecurityHeadersMiddleware
+from _ravnar.security import SecurityHeadersMiddleware, make_authorized_user_factory
 from _ravnar.utils import as_awaitable
 
 from .api import make_router as make_api_router
