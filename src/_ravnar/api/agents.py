@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import AsyncIterator, Callable
 from typing import TYPE_CHECKING, Annotated, Any
 
 import ag_ui.core
@@ -50,7 +50,7 @@ def _make_dynamic_agents_router(
         "Can be checked with [`GET /api/config`](#/API/get_config_api_config_get)."
     )
 
-    def set_dynamic_agent_render_template_context() -> Iterator[None]:
+    async def set_dynamic_agent_render_template_context() -> AsyncIterator[None]:
         with ImportStringWithParams.explicit_render_template_context(
             agent_handler.get_dynamic_render_template_context()
         ):

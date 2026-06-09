@@ -133,12 +133,15 @@ class ImportStringWithParams(BaseModel, Generic[T]):
         "render_template_context", default=None
     )
 
-    @contextlib.contextmanager
     @classmethod
-    def explicit_render_template_context(cls, ctx: dict[str, str]) -> Iterator[dict[str, str]]:
-        cls._render_template_context.set(ctx)
-        yield ctx
-        cls._render_template_context.set(None)
+    def explicit_render_template_context(cls, ctx: dict[str, str]) -> contextlib.AbstractContextManager[dict[str, str]]:
+        @contextlib.contextmanager
+        def cm() -> Iterator[dict[str, str]]:
+            cls._render_template_context.set(ctx)
+            yield ctx
+            cls._render_template_context.set(None)
+
+        return cm()
 
     cls_or_fn: ImportString[type[T] | Callable[..., T]]
     params: dict[str, Any] = Field(default_factory=dict)
