@@ -91,7 +91,7 @@ class Ravnar:
                             error=str(original.__cause__),
                         )
                         return JSONResponse(
-                            status_code=400,
+                            status_code=status.HTTP_400_BAD_REQUEST,
                             content={"detail": original.message},
                         )
             return await request_validation_exception_handler(request, exc)
