@@ -7,8 +7,8 @@ import pytest
 import yaml
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, YamlConfigSettingsSource
 
-from _ravnar.agents import Agent
 from _ravnar.config import AgentConfig, BaseConfig, Config, DynamicAgentConfig, ImportStringWithParams
+from tests.utils import MockAgent
 
 
 @pytest.fixture()
@@ -167,19 +167,10 @@ def test_template_rendering_in_list(mocker, make_test_config, source):
     assert config.security.cors.allowed_origins == [f"https://{app_domain}"]
 
 
-class MockAgent(Agent):
-    def __init__(self, param="unset"):
-        self.param = param
-
-    async def run(self, input):
-        raise AssertionError
-        yield
-
-
 @pytest.mark.parametrize("source", ["file", "env", "env_json"])
 @pytest.mark.parametrize("input_type", ["plain", "object"])
 def test_import_string_with_params(make_test_config, source, input_type):
-    import_path = f"{__name__}.{MockAgent.__name__}"
+    import_path = f"{MockAgent.__module__}.{MockAgent.__name__}"
     default_param = "unset"
     explicit_param = "sentinel"
 
@@ -211,7 +202,7 @@ def test_import_string_with_params_nested_error_localization():
     with pytest.raises(pydantic.ValidationError) as exc_info:
         ImportStringWithParams.model_validate(
             {
-                "cls_or_fn": f"{__name__}.{MockAgent.__name__}",
+                "cls_or_fn": f"{MockAgent.__module__}.{MockAgent.__name__}",
                 "params": {"param": {"cls_or_fn": "non_existing_module.NonExistingClass"}},
             }
         )
@@ -223,3 +214,75 @@ def test_import_string_with_params_nested_error_localization():
     details = ve.errors()[0]
     assert details["loc"] == ("params", "param", "cls_or_fn")
     assert "non_existing_module" in details["msg"]
+
+
+class TestImportStringWithParamsRestrictedContext:
+    def test_allowed_env_var_renders(self, mocker):
+        var = "ALLOWED_VAR"
+        value = "allowed_value"
+
+        mocker.patch.dict(os.environ, {var: value})
+        with ImportStringWithParams.explicit_render_template_context({var: value}):
+            result = ImportStringWithParams.model_validate(
+                {
+                    "cls_or_fn": MockAgent,
+                    "params": {"param": "{{ ALLOWED_VAR }}"},
+                }
+            )
+            assert result.params["param"] == value
+
+    def test_denied_env_var_raises_template_render_error(self, mocker):
+        var = "DENIED_VAR"
+        value = "denied_value"
+
+        mocker.patch.dict(os.environ, {var: value})
+        with (
+            ImportStringWithParams.explicit_render_template_context({}),
+            pytest.raises(pydantic.ValidationError, match="Invalid configuration"),
+        ):
+            ImportStringWithParams.model_validate(
+                {
+                    "cls_or_fn": MockAgent,
+                    "params": {"param": "{{ DENIED_VAR }}"},
+                }
+            )
+
+    def test_security_error_in_restricted_context_raises_template_render_error(self, mocker):
+        mocker.patch.dict(os.environ, {"SECRET": "secret_value"})
+        with (
+            ImportStringWithParams.explicit_render_template_context({"SECRET": "secret_value"}),
+            pytest.raises(pydantic.ValidationError, match="Invalid configuration"),
+        ):
+            ImportStringWithParams.model_validate(
+                {
+                    "cls_or_fn": MockAgent,
+                    "params": {"param": "{{ ''.__class__ }}"},
+                }
+            )
+
+    def test_no_context_falls_back_to_full_environ(self, mocker):
+        var = "FULL_VAR"
+        value = "full_value"
+
+        mocker.patch.dict(os.environ, {var: value})
+        result = ImportStringWithParams.model_validate(
+            {
+                "cls_or_fn": MockAgent,
+                "params": {"param": "{{ FULL_VAR }}"},
+            }
+        )
+        assert result.params["param"] == value
+
+
+class TestAllowlist:
+    def test_valid_entries(self):
+        config = DynamicAgentConfig(enabled=True, allowed_env_vars=["HOME", "USER"])
+        assert config.allowed_env_vars == ["HOME", "USER"]
+
+    def test_wildcard_only(self):
+        config = DynamicAgentConfig(enabled=True, allowed_env_vars=["*"])
+        assert config.allowed_env_vars == ["*"]
+
+    def test_wildcard_with_other_entries_raises(self, matches="Wildcard"):
+        with pytest.raises(pydantic.ValidationError):
+            DynamicAgentConfig(enabled=True, allowed_env_vars=["*", "HOME"])

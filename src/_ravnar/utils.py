@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import functools
 import inspect
 import json
@@ -8,9 +9,10 @@ import os
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from datetime import UTC, datetime
-from typing import Any, Generic, TypeVar, cast, get_type_hints
+from typing import Any, ClassVar, Generic, TypeVar, cast, get_type_hints
 
 import jinja2
+import jinja2.sandbox
 from pydantic import (
     BaseModel,
     Field,
@@ -107,17 +109,40 @@ def now() -> datetime:
     return datetime.now(tz=UTC)
 
 
-def render_template(s: Any) -> Any:
+class TemplateRenderError(ValueError):
+    def __init__(self, *, template: str, reason: str, message: str) -> None:
+        self.template = template
+        self.reason = reason
+        self.message = message
+        super().__init__(message)
+
+
+def render_template(s: Any, context: dict[str, str]) -> Any:
     if isinstance(s, str):
-        return jinja2.Environment().from_string(s).render(**os.environ)
+        env = jinja2.sandbox.SandboxedEnvironment(undefined=jinja2.StrictUndefined)
+        return env.from_string(s).render(**context)
     if isinstance(s, dict):
-        return {render_template(k): render_template(v) for k, v in s.items()}
+        return {render_template(k, context): render_template(v, context) for k, v in s.items()}
     if isinstance(s, list):
-        return [render_template(v) for v in s]
+        return [render_template(v, context) for v in s]
     return s
 
 
 class ImportStringWithParams(BaseModel, Generic[T]):
+    _render_template_context: ClassVar[contextvars.ContextVar[dict[str, str] | None]] = contextvars.ContextVar(
+        "render_template_context", default=None
+    )
+
+    @classmethod
+    def explicit_render_template_context(cls, ctx: dict[str, str]) -> contextlib.AbstractContextManager[dict[str, str]]:
+        @contextlib.contextmanager
+        def cm() -> Iterator[dict[str, str]]:
+            cls._render_template_context.set(ctx)
+            yield ctx
+            cls._render_template_context.set(None)
+
+        return cm()
+
     cls_or_fn: ImportString[type[T] | Callable[..., T]]
     params: dict[str, Any] = Field(default_factory=dict)
 
@@ -172,14 +197,29 @@ class ImportStringWithParams(BaseModel, Generic[T]):
     @classmethod
     def _render_field_templates(cls, f: Any) -> Any:
         if isinstance(f, str):
-            return render_template(f)
+            return cls._render_template(f)
 
         return f
 
     @field_validator("params", mode="after")
     @classmethod
     def _render_param_items(cls, params: dict[str, Any]) -> dict[str, Any]:
-        return {render_template(k): render_template(v) for k, v in params.items()}
+        return {cls._render_template(k): cls._render_template(v) for k, v in params.items()}
+
+    @classmethod
+    def _render_template(cls, s: Any) -> Any:
+        explicit_ctx = cls._render_template_context.get()
+        ctx = explicit_ctx if explicit_ctx is not None else dict(os.environ)
+        try:
+            return render_template(s, ctx)
+        except (jinja2.exceptions.SecurityError, jinja2.exceptions.UndefinedError) as exc:
+            if explicit_ctx is not None:
+                raise TemplateRenderError(
+                    template=str(exc),
+                    reason=type(exc).__name__,
+                    message="Invalid configuration",
+                ) from exc
+            raise
 
     @model_serializer(mode="wrap")
     def _serialize(self, nxt: SerializerFunctionWrapHandler) -> Any:
