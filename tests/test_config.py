@@ -272,3 +272,17 @@ class TestImportStringWithParamsRestrictedContext:
             }
         )
         assert result.params["param"] == "full_value"
+
+
+class TestAllowlist:
+    def test_valid_entries(self):
+        config = DynamicAgentConfig(enabled=True, allowed_env_vars=["HOME", "USER"])
+        assert config.allowed_env_vars == ["HOME", "USER"]
+
+    def test_wildcard_only(self):
+        config = DynamicAgentConfig(enabled=True, allowed_env_vars=["*"])
+        assert config.allowed_env_vars == ["*"]
+
+    def test_wildcard_with_other_entries_raises(self, matches="Wildcard"):
+        with pytest.raises(pydantic.ValidationError):
+            DynamicAgentConfig(enabled=True, allowed_env_vars=["*", "HOME"])
