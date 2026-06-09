@@ -4,10 +4,10 @@ import os
 import sys
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, Self, TypeVar
+from typing import Annotated, Any, Self, TypeVar
 
 import l2sl
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import AfterValidator, BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict, YamlConfigSettingsSource
 from upath import UPath
 
@@ -23,24 +23,33 @@ def interactive_session() -> bool:
     return sys.stdout.isatty()
 
 
-class RenderableMixin:
+def _validate_allowlist_wildcard(allowlist: list[str]) -> list[str]:
+    if "*" in allowlist and len(allowlist) > 1:
+        raise ValueError('Wildcard "*" must be the sole allowlist entry. It cannot be combined with other entries.')
+    return allowlist
+
+
+Allowlist = Annotated[list[str], AfterValidator(_validate_allowlist_wildcard)]
+
+
+class RenderableConfigMixin:
     @field_validator("*", mode="before")
     @classmethod
     def _render_templates(cls, data: Any) -> Any:
-        return render_template(data)
+        return render_template(data, context=dict(os.environ))
 
 
-class LoggingConfig(BaseModel, RenderableMixin):
+class LoggingConfig(BaseModel, RenderableConfigMixin):
     level: l2sl.LogLevel = l2sl.LogLevel("info")
     as_json: bool = Field(default_factory=lambda: not interactive_session())
 
 
-class TracingConfig(BaseModel, RenderableMixin):
+class TracingConfig(BaseModel, RenderableConfigMixin):
     endpoint: str | None = None
     as_logs: bool = Field(default_factory=lambda values: interactive_session() and values["endpoint"] is None)
 
 
-class ServerConfig(BaseModel, RenderableMixin):
+class ServerConfig(BaseModel, RenderableConfigMixin):
     hostname: str = "127.0.0.1"
     port: int = 8000
     proxy_headers: bool = False
@@ -50,12 +59,12 @@ class ServerConfig(BaseModel, RenderableMixin):
     tracing: TracingConfig = Field(default_factory=TracingConfig)
 
 
-class CORSConfig(BaseModel, RenderableMixin):
-    allowed_origins: list[str] = Field(default_factory=lambda: ["*"])
-    allowed_headers: list[str] = Field(default_factory=list)
+class CORSConfig(BaseModel, RenderableConfigMixin):
+    allowed_origins: Allowlist = Field(default_factory=lambda: ["*"])
+    allowed_headers: Allowlist = Field(default_factory=list)
 
 
-class SecurityConfig(BaseModel, RenderableMixin):
+class SecurityConfig(BaseModel, RenderableConfigMixin):
     authenticator: ImportStringWithParams[Authenticator] | None = None
     cors: CORSConfig = Field(default_factory=CORSConfig)
 
@@ -69,44 +78,41 @@ def _local_storage() -> Path:
     return p
 
 
-class DatabaseConfig(BaseModel, RenderableMixin):
+class DatabaseConfig(BaseModel, RenderableConfigMixin):
     dsn: str = Field(default_factory=lambda: f"sqlite:///{_local_storage() / 'state.db'}")
 
 
-class URLDataSourceConfig(BaseModel, RenderableMixin):
+class URLDataSourceConfig(BaseModel, RenderableConfigMixin):
     enabled: bool = False
-    allowlist: list[str] = []
+    allowlist: Allowlist = Field(default_factory=list)
     timeout: timedelta = timedelta(seconds=30)
 
     @field_validator("allowlist", mode="after")
     @classmethod
-    def _normalize_allowlist_entries(cls, v: list[str]) -> list[str]:
-        if "*" in v:
-            if len(v) > 1:
-                raise ValueError(
-                    'Wildcard "*" must be the sole allowlist entry. It cannot be combined with specific domains.'
-                )
-        else:
-            v = [normalize_hostname(entry) for entry in v]
-        return v
+    def _normalize_allowlist_entries(cls, allowlist: list[str]) -> list[str]:
+        if "*" in allowlist:
+            return allowlist
+
+        return [normalize_hostname(entry) for entry in allowlist]
 
 
-class FileStorageConfig(BaseModel, RenderableMixin):
+class FileStorageConfig(BaseModel, RenderableConfigMixin):
     path: UPath = Field(default_factory=lambda: UPath(_local_storage() / "files"))
     url_data_source: URLDataSourceConfig = Field(default_factory=URLDataSourceConfig)
 
 
-class StorageConfig(BaseModel, RenderableMixin):
+class StorageConfig(BaseModel, RenderableConfigMixin):
     enabled: bool = True
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     files: FileStorageConfig = Field(default_factory=FileStorageConfig)
 
 
-class DynamicAgentConfig(BaseModel, RenderableMixin):
+class DynamicAgentConfig(BaseModel, RenderableConfigMixin):
     enabled: bool = False
+    allowed_env_vars: Allowlist = Field(default_factory=list)
 
 
-class AgentConfig(BaseModel, RenderableMixin):
+class AgentConfig(BaseModel, RenderableConfigMixin):
     static: dict[str, ImportStringWithParams[Agent]] = Field(
         default_factory=lambda: {  # type: ignore[arg-type]
             "default": ImportStringWithParams(cls_or_fn=DefaultAgent),
@@ -121,7 +127,7 @@ class AgentConfig(BaseModel, RenderableMixin):
         return self
 
 
-class BaseConfig(BaseSettings, RenderableMixin):
+class BaseConfig(BaseSettings, RenderableConfigMixin):
     server: ServerConfig = Field(default_factory=ServerConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)

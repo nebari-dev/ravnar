@@ -1,9 +1,9 @@
 import pytest
 from fastapi import status
 
-from _ravnar.auth import User
 from _ravnar.authenticators import BearerTokenAuthenticator, ForwardedUserAuthenticator
 from _ravnar.config import BaseConfig
+from _ravnar.security import User
 from tests.utils import make_app_client
 
 

@@ -9,9 +9,10 @@ from fastapi import Depends
 from fastapi.security import APIKeyHeader
 from fastapi.testclient import TestClient as _TestClient
 
-from _ravnar.auth import ALL_PERMISSIONS, User
+from _ravnar.agents import Agent
 from _ravnar.config import BaseConfig
 from _ravnar.core import Ravnar
+from _ravnar.security import ALL_PERMISSIONS, User
 from ravnar.authenticators import Authenticator
 
 
@@ -109,3 +110,12 @@ def safe_extract_response_content(response):
         decoded_content = content.decode()
         decoded_content = f"\n{json.dumps(json.loads(content), indent=2)}"
     return decoded_content
+
+
+class MockAgent(Agent):
+    def __init__(self, param="unset"):
+        self.param = param
+
+    async def run(self, input):
+        raise AssertionError
+        yield

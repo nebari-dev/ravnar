@@ -10,7 +10,6 @@ __all__ = [
     "User",
 ]
 
-from _ravnar.auth import ALL_PERMISSIONS, Permission, User
 from _ravnar.authenticators import (
     Authenticator,
     BearerTokenAuthenticator,
@@ -19,6 +18,7 @@ from _ravnar.authenticators import (
     OIDCTokenValidator,
     TokenValidator,
 )
+from _ravnar.security import ALL_PERMISSIONS, Permission, User
 
 # isort: split
 

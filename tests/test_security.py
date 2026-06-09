@@ -1,8 +1,10 @@
 import pydantic
 import pytest
 from fastapi import status
+from fastapi.responses import Response
+from starlette.testclient import TestClient
 
-from _ravnar.auth import ALL_PERMISSIONS, Permission, User, assert_permissions
+from _ravnar.security import ALL_PERMISSIONS, DEFAULT_SECURITY_HEADERS, Permission, User, assert_permissions
 
 
 class TestPermissionValidator:
@@ -67,3 +69,33 @@ class TestAssertPermissions:
     def test_all_permissions_present_single(self):
         user = User(id="test", permissions=["files:read"])
         assert_permissions(user, "files:read")
+
+
+class TestSecurityHeaders:
+    @pytest.mark.parametrize(
+        "endpoint,expected_status",
+        [
+            ("/health", status.HTTP_200_OK),
+            ("/version", status.HTTP_200_OK),
+            ("/nonexistent", status.HTTP_404_NOT_FOUND),
+            ("/api/user", status.HTTP_200_OK),
+        ],
+    )
+    def test_security_headers_present(self, app_client: TestClient, endpoint: str, expected_status: int):
+        response = app_client.get(endpoint)
+        assert response.status_code == expected_status
+
+        for header_name, expected_value in DEFAULT_SECURITY_HEADERS.items():
+            assert header_name in response.headers
+            assert response.headers[header_name] == expected_value
+
+    def test_headers_not_overwritten_when_already_set(self, app_client: TestClient):
+        header = "X-Content-Type-Options"
+        value = "some-other-value"
+
+        @app_client.app.get("/custom-header")
+        def custom_header_endpoint():
+            return Response("", headers={header: value})
+
+        response = app_client.get("/custom-header")
+        assert response.headers[header] == value

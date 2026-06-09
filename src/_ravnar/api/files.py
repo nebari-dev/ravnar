@@ -6,8 +6,8 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, Response
 
-from _ravnar.auth import User
 from _ravnar.file_storage import FileHandler, FileInputContent, convert_file_to_input_content
+from _ravnar.security import User
 
 
 def make_router(*, file_handler: FileHandler, authorized_user_with: Callable[..., Any]) -> APIRouter:
