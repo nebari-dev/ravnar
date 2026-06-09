@@ -7,18 +7,8 @@ from fastapi import status
 
 import ravnar.agents
 from _ravnar import schema
-from _ravnar.agents import Agent
 from _ravnar.config import BaseConfig
-from tests.utils import HeaderAuthenticator, make_app_client
-
-
-class MockAgent(Agent):
-    def __init__(self, param="unset"):
-        self.param = param
-
-    async def run(self, input):
-        raise AssertionError
-        yield
+from tests.utils import HeaderAuthenticator, MockAgent, make_app_client
 
 
 def make_config(*, dynamic_enabled=False):
@@ -222,7 +212,7 @@ class TestDynamicAgentsEnabled:
             json={
                 "id": "env-agent",
                 "agent": {
-                    "cls_or_fn": f"tests.api.test_agents.{MockAgent.__name__}",
+                    "cls_or_fn": f"{MockAgent.__module__}.{MockAgent.__name__}",
                     "params": {"param": "{{ HOME }}"},
                 },
             },
@@ -236,7 +226,7 @@ class TestDynamicAgentsEnabled:
             json={
                 "id": "sandbox-agent",
                 "agent": {
-                    "cls_or_fn": f"tests.api.test_agents.{MockAgent.__name__}",
+                    "cls_or_fn": f"{MockAgent.__module__}.{MockAgent.__name__}",
                     "params": {"param": "{{ ''.__class__ }}"},
                 },
             },
@@ -269,7 +259,7 @@ class TestDynamicAgentsWithAllowedEnvVars:
             json={
                 "id": "allowed-env-agent",
                 "agent": {
-                    "cls_or_fn": MockAgent,
+                    "cls_or_fn": f"{MockAgent.__module__}.{MockAgent.__name__}",
                     "params": {"param": "{{ ALLOWED_VAR }}"},
                 },
             },
@@ -284,7 +274,7 @@ class TestDynamicAgentsWithAllowedEnvVars:
             json={
                 "id": "denied-env-agent",
                 "agent": {
-                    "cls_or_fn": MockAgent,
+                    "cls_or_fn": f"{MockAgent.__module__}.{MockAgent.__name__}",
                     "params": {"param": "{{ DENIED_VAR }}"},
                 },
             },

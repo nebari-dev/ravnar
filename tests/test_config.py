@@ -7,8 +7,8 @@ import pytest
 import yaml
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, YamlConfigSettingsSource
 
-from _ravnar.agents import Agent
 from _ravnar.config import AgentConfig, BaseConfig, Config, DynamicAgentConfig, ImportStringWithParams
+from tests.utils import MockAgent
 
 
 @pytest.fixture()
@@ -167,19 +167,10 @@ def test_template_rendering_in_list(mocker, make_test_config, source):
     assert config.security.cors.allowed_origins == [f"https://{app_domain}"]
 
 
-class MockAgent(Agent):
-    def __init__(self, param="unset"):
-        self.param = param
-
-    async def run(self, input):
-        raise AssertionError
-        yield
-
-
 @pytest.mark.parametrize("source", ["file", "env", "env_json"])
 @pytest.mark.parametrize("input_type", ["plain", "object"])
 def test_import_string_with_params(make_test_config, source, input_type):
-    import_path = f"{__name__}.{MockAgent.__name__}"
+    import_path = f"{MockAgent.__module__}.{MockAgent.__name__}"
     default_param = "unset"
     explicit_param = "sentinel"
 
@@ -211,7 +202,7 @@ def test_import_string_with_params_nested_error_localization():
     with pytest.raises(pydantic.ValidationError) as exc_info:
         ImportStringWithParams.model_validate(
             {
-                "cls_or_fn": f"{__name__}.{MockAgent.__name__}",
+                "cls_or_fn": f"{MockAgent.__module__}.{MockAgent.__name__}",
                 "params": {"param": {"cls_or_fn": "non_existing_module.NonExistingClass"}},
             }
         )
