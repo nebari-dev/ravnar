@@ -133,11 +133,14 @@ class AgentHandler(SetupTeardownMixin):
         self._dynamic_agents: dict[str, Agent] = {}
         self._event_encoder = ag_ui.encoder.EventEncoder()
         self._dynamic_enabled = agent_config.dynamic.enabled
-        self._dynamic_config = agent_config.dynamic
+        self._dynamic_allowed_env_vars = agent_config.dynamic.allowed_env_vars
 
     def get_dynamic_render_template_context(self) -> dict[str, str]:
-        allowed = self._dynamic_config.allowed_env_vars
-        return {k: v for k, v in os.environ.items() if k in allowed}
+        ctx = dict(os.environ)
+        if "*" in self._dynamic_allowed_env_vars:
+            return ctx
+
+        return {k: v for k, v in ctx.items() if k in self._dynamic_allowed_env_vars}
 
     @staticmethod
     async def _setup_agent(agent: Agent) -> None:

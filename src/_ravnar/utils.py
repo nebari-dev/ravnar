@@ -9,7 +9,7 @@ import os
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from datetime import UTC, datetime
-from typing import Any, Generic, TypeVar, cast, get_type_hints
+from typing import Any, ClassVar, Generic, TypeVar, cast, get_type_hints
 
 import jinja2
 import jinja2.sandbox
@@ -109,14 +109,7 @@ def now() -> datetime:
     return datetime.now(tz=UTC)
 
 
-render_template_context: contextvars.ContextVar[dict[str, str] | None] = contextvars.ContextVar(
-    "render_template_context", default=None
-)
-
-
 class TemplateRenderError(ValueError):
-    """Raised when template rendering fails in a restricted context."""
-
     def __init__(self, *, template: str, reason: str, message: str) -> None:
         self.template = template
         self.reason = reason
@@ -136,6 +129,17 @@ def render_template(s: Any, context: dict[str, str]) -> Any:
 
 
 class ImportStringWithParams(BaseModel, Generic[T]):
+    _render_template_context: ClassVar[contextvars.ContextVar[dict[str, str] | None]] = contextvars.ContextVar(
+        "render_template_context", default=None
+    )
+
+    @contextlib.contextmanager
+    @classmethod
+    def explicit_render_template_context(cls, ctx: dict[str, str]) -> Iterator[dict[str, str]]:
+        cls._render_template_context.set(ctx)
+        yield ctx
+        cls._render_template_context.set(None)
+
     cls_or_fn: ImportString[type[T] | Callable[..., T]]
     params: dict[str, Any] = Field(default_factory=dict)
 
@@ -201,18 +205,17 @@ class ImportStringWithParams(BaseModel, Generic[T]):
 
     @classmethod
     def _render_template(cls, s: Any) -> Any:
-        ctx = render_template_context.get()
-        if ctx is None:
-            ctx = dict(os.environ)
+        explicit_ctx = cls._render_template_context.get()
+        ctx = explicit_ctx if explicit_ctx is not None else dict(os.environ)
         try:
             return render_template(s, ctx)
-        except (jinja2.exceptions.SecurityError, jinja2.exceptions.UndefinedError) as e:
-            if render_template_context.get() is not None:
+        except (jinja2.exceptions.SecurityError, jinja2.exceptions.UndefinedError) as exc:
+            if explicit_ctx is not None:
                 raise TemplateRenderError(
-                    template=str(s),
-                    reason=type(e).__name__,
+                    template=str(exc),
+                    reason=type(exc).__name__,
                     message="Invalid configuration",
-                ) from e
+                ) from exc
             raise
 
     @model_serializer(mode="wrap")

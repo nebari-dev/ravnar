@@ -3,7 +3,7 @@ import os
 import jinja2
 import pytest
 
-from _ravnar.utils import TemplateRenderError, render_template, render_template_context
+from _ravnar.utils import TemplateRenderError, _render_template_context, render_template
 
 
 class TestRenderTemplate:
@@ -55,17 +55,17 @@ class TestRenderTemplate:
 class TestRenderTemplateContext:
     def test_restricted_context_used_when_set(self, mocker):
         mocker.patch.dict(os.environ, {"ALLOWED": "yes", "DENIED": "no"})
-        token = render_template_context.set({"ALLOWED": "yes"})
+        token = _render_template_context.set({"ALLOWED": "yes"})
         try:
-            assert render_template("{{ ALLOWED }}", render_template_context.get()) == "yes"
+            assert render_template("{{ ALLOWED }}", _render_template_context.get()) == "yes"
             with pytest.raises(jinja2.exceptions.UndefinedError):
-                render_template("{{ DENIED }}", render_template_context.get())
+                render_template("{{ DENIED }}", _render_template_context.get())
         finally:
-            render_template_context.reset(token)
+            _render_template_context.reset(token)
 
     def test_none_context_falls_back_to_os_environ(self, mocker):
         mocker.patch.dict(os.environ, {"FALLBACK_VAR": "fallback_value"})
-        assert render_template_context.get() is None
+        assert _render_template_context.get() is None
         # When called directly with os.environ, it works
         assert render_template("{{ FALLBACK_VAR }}", dict(os.environ)) == "fallback_value"
 

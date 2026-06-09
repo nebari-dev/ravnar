@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
-from collections.abc import AsyncIterator
+from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Annotated, Any
 
 import ag_ui.core
@@ -10,7 +9,7 @@ from fastapi import Depends, Path
 
 from _ravnar import schema
 from _ravnar.security import User
-from _ravnar.utils import render_template_context
+from _ravnar.utils import ImportStringWithParams
 
 if TYPE_CHECKING:
     from _ravnar.core import AgentHandler
@@ -51,11 +50,13 @@ def _make_dynamic_agents_router(
         "Can be checked with [`GET /api/config`](#/API/get_config_api_config_get)."
     )
 
-    async def _set_restricted_template_context() -> AsyncIterator[None]:
-        render_template_context.set(agent_handler.get_dynamic_render_template_context())
-        yield
+    def set_dynamic_agent_render_template_context() -> Iterator[None]:
+        with ImportStringWithParams.explicit_render_template_context(
+            agent_handler.get_dynamic_render_template_context()
+        ):
+            yield
 
-    @router.post("", description=description, dependencies=[Depends(_set_restricted_template_context)])
+    @router.post("", description=description, dependencies=[Depends(set_dynamic_agent_render_template_context)])
     async def register_agent(
         data: schema.RegisterAgentData,
         user: User = Depends(authorized_user_with("agents:write")),  # noqa: B008
