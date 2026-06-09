@@ -7,7 +7,14 @@ import pytest
 import yaml
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, YamlConfigSettingsSource
 
-from _ravnar.config import AgentConfig, BaseConfig, Config, DynamicAgentConfig, ImportStringWithParams
+from _ravnar.config import (
+    AgentConfig,
+    BaseConfig,
+    Config,
+    DynamicAgentConfig,
+    ImportStringWithParams,
+    URLDataSourceConfig,
+)
 from tests.utils import MockAgent
 
 
@@ -286,3 +293,23 @@ class TestAllowlist:
     def test_wildcard_with_other_entries_raises(self, matches="Wildcard"):
         with pytest.raises(pydantic.ValidationError):
             DynamicAgentConfig(enabled=True, allowed_env_vars=["*", "HOME"])
+
+
+class TestURLDataSourceConfig:
+    def test_allowlist_normalization(self) -> None:
+        config = URLDataSourceConfig(allowed_hostnames=["GITHUB.COM", "München.example.com"])
+        assert config.allowed_hostnames == ["github.com", "xn--mnchen-3ya.example.com"]
+
+    def test_wildcard_preserved(self) -> None:
+        config = URLDataSourceConfig(allowed_hostnames=["*"])
+        assert config.allowed_hostnames == ["*"]
+
+    def test_wildcard_with_others_blocked(self) -> None:
+        with pytest.raises(pydantic.ValidationError) as exc_info:
+            URLDataSourceConfig(allowed_hostnames=["*", "example.com"])
+        assert "must be the sole" in str(exc_info.value)
+
+    def test_invalid_allowlist_entry_raises(self) -> None:
+        # Double dot creates an empty label which is invalid in IDNA
+        with pytest.raises(pydantic.ValidationError):
+            URLDataSourceConfig(allowed_hostnames=["example..com"])

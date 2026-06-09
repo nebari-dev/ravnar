@@ -167,7 +167,7 @@ class FileHandler:
         response = await self._fetch_url(
             file_input_content.source.value,
             timeout=self._config.url_data_source.timeout,
-            allowlist=self._config.url_data_source.allowlist,
+            allowed_hostnames=self._config.url_data_source.allowed_hostnames,
         )
 
         url = str(response.request.url)
@@ -189,7 +189,7 @@ class FileHandler:
         url: str,
         *,
         timeout: timedelta,  # noqa: ASYNC109
-        allowlist: list[str],
+        allowed_hostnames: list[str],
         max_redirects: int = 20,
     ) -> httpx.Response:
         redirect_chain: list[str] = []
@@ -198,7 +198,7 @@ class FileHandler:
         )
         async with httpx.AsyncClient(follow_redirects=False, timeout=timeout.total_seconds()) as client:
             for _ in range(max_redirects):
-                response = await client.get(FileHandler._validate_url(url, allowlist=allowlist))
+                response = await client.get(FileHandler._validate_url(url, allowed_hostnames=allowed_hostnames))
                 next_request = response.next_request
                 if next_request is not None:
                     url = str(next_request.url)
@@ -217,7 +217,7 @@ class FileHandler:
             raise failure_exception
 
     @staticmethod
-    def _validate_url(url: str, *, allowlist: list[str]) -> str:
+    def _validate_url(url: str, *, allowed_hostnames: list[str]) -> str:
         failure_exception = HTTPException(status.HTTP_400_BAD_REQUEST, detail="URL fetch not allowed")
 
         parts = urllib.parse.urlsplit(url)
@@ -229,10 +229,10 @@ class FileHandler:
         except Exception as exc:
             raise failure_exception from exc
 
-        if "*" in allowlist:
+        if "*" in allowed_hostnames:
             return url
 
-        for entry in allowlist:
+        for entry in allowed_hostnames:
             if normalized_hostname == entry or normalized_hostname.endswith("." + entry):
                 return url
 

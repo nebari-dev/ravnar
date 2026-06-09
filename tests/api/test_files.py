@@ -62,7 +62,7 @@ class TestFiles:
                     "files": {
                         "url_data_source": {
                             "enabled": True,
-                            "allowlist": [hostname],
+                            "allowed_hostnames": [hostname],
                         },
                     },
                 },
