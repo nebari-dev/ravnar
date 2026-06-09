@@ -89,11 +89,11 @@ class URLDataSourceConfig(BaseModel, RenderableConfigMixin):
 
     @field_validator("allowed_hostnames", mode="after")
     @classmethod
-    def _normalize_allowlist_entries(cls, allowed_hostnames: list[str]) -> list[str]:
-        if "*" in allowed_hostnames:
-            return allowed_hostnames
+    def _normalize_hostnames(cls, allowlist: list[str]) -> list[str]:
+        if "*" in allowlist:
+            return allowlist
 
-        return [normalize_hostname(hostname) for hostname in allowed_hostnames]
+        return [normalize_hostname(hostname) for hostname in allowlist]
 
 
 class FileStorageConfig(BaseModel, RenderableConfigMixin):
