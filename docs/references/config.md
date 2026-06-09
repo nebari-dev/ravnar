@@ -30,7 +30,8 @@ values.
     {% raw %}
     ```yaml
     storage:
-      database_dsn: 'postgresql+psycopg://{{ DB_USERNAME }}:{{ DB_PASSWORD }}@{{ DB_HOST }}'
+      database:
+        dsn: 'postgresql+psycopg://{{ DB_USERNAME }}:{{ DB_PASSWORD }}@{{ DB_HOST }}'
     ```
     {% endraw %}
 
@@ -40,9 +41,8 @@ ravnar is built upon a flexible plugin architecture for its core components. Plu
 string references to Python objects. These references can point to either a class (type) or a factory function, e.g.:
 
 ```yaml
-authentication:
-  custom:
-    handler: ravnar.authenticators.ForwardedUserAuthenticator
+security:
+  authenticator: ravnar.authenticators.ForwardedUserAuthenticator
 ```
 
 On startup, the objects will be loaded and instantiated roughly equivalent to the following Python code:
@@ -75,9 +75,9 @@ be configured with:
 ```yaml
 security:
   authenticator:
-  cls_or_fn: ravnar.authenticators.ForwardedUserAuthenticator
-  params:
-    id_header: X-My-User-Id
+    cls_or_fn: ravnar.authenticators.ForwardedUserAuthenticator
+    params:
+      id_header: X-My-User-Id
 ```
 
 - `cls_or_fn`: A string containing the import path to the class or factory function, following the same semantics as the
@@ -253,17 +253,23 @@ Optional [reference](#plugins) to a [ravnar.authenticators.Authenticator][].
 
 ##### Allowed Origins
 
-List of allowed origins.
+List of allowed origins. Use `"*"` to allow all origins. If `"*"` is used, it must be the sole entry.
 
 {{ config_options(["security", "cors", "allowed_origins"]) }}
 
 ##### Allowed Headers
 
-List of allowed headers.
+List of allowed headers. Use `"*"` to allow all headers. If `"*"` is used, it must be the sole entry.
 
 {{ config_options(["security", "cors", "allowed_headers"]) }}
 
 ### Storage
+
+#### Enabled
+
+Whether storage is enabled.
+
+{{ config_options(["storage", "enabled"]) }}
 
 #### Database DSN
 
@@ -282,7 +288,7 @@ List of allowed headers.
     {% raw %}'{{ "my:secret@password" | urlencode }}'{% endraw %}
     ```
 
-{{ config_options(["storage", "database_dsn"], "sqlite:///{{ PWD }}/.ravnar_local/state.db",
+{{ config_options(["storage", "database", "dsn"], "sqlite:///{{ PWD }}/.ravnar_local/state.db",
 "sqlite:///${PWD}/.ravnar_local/state.db") }}
 
 #### File Storage Path
@@ -291,18 +297,30 @@ Path of the file storage. See the
 [`universal-pathlib` documentation](https://github.com/fsspec/universal_pathlib?tab=readme-ov-file#currently-supported-filesystems-and-protocols)
 for supported filesystems and protocols.
 
-{{ config_options(["storage",  "file_storage_path"], "{{ PWD }}/.ravnar_local", "${PWD}/.ravnar_local") }}
+{{ config_options(["storage", "files", "path"], "{{ PWD }}/.ravnar_local/files", "${PWD}/.ravnar_local/files") }}
 
-!!! info
+#### URL Data Source
 
-    To separate the protocol from the path or to use additional storage options, you can also pass a dictionary
+Configuration for fetching files from URLs.
 
-    {{ config_options(["storage", "persistent", "file_storage_path"], {"path": "...", "protocol": "my-protocol", "storage_options": {"foo": "bar"}}) | indent(4) }}
+##### Enabled
 
-    !!! note
+Whether URL data sources are enabled.
 
-        [Templating](#templating) and [plugins](#plugins) do not work inside the dictionary as this is not resolved by
-        ravnar.
+{{ config_options(["storage", "files", "url_data_source", "enabled"]) }}
+
+##### Allowed Hostnames
+
+List of allowed hostnames for URL data sources. Use `"*"` to allow all hostnames. If `"*"` is used, it must be the sole
+entry.
+
+{{ config_options(["storage", "files", "url_data_source", "allowed_hostnames"]) }}
+
+##### Timeout
+
+Timeout for fetching URL data sources in [ISO8601 durations notation](https://en.wikipedia.org/wiki/ISO_8601#Durations).
+
+{{ config_options(["storage", "files", "url_data_source", "timeout"]) }}
 
 ### Agents
 
@@ -316,6 +334,13 @@ to be configured.
 Whether [references](#plugins) to [ravnar.agents.Agent][]s can be (un-)registered through the [REST API](./rest_api.md).
 
 {{ config_options(["agents", "dynamic", "enabled"]) }}
+
+##### Allowed Environment Variables
+
+List of environment variables that dynamic agents are allowed to access during creation. Use `"*"` to allow all
+environment variables. If `"*"` is used, it must be the sole entry.
+
+{{ config_options(["agents", "dynamic", "allowed_env_vars"]) }}
 
 #### Static Agents
 
