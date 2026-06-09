@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+from datetime import timedelta
 from pathlib import Path
 from typing import Annotated, Any, Self, TypeVar
 
@@ -10,7 +11,7 @@ from pydantic import AfterValidator, BaseModel, Field, field_validator, model_va
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict, YamlConfigSettingsSource
 from upath import UPath
 
-from _ravnar.utils import ImportStringWithParams, render_template
+from _ravnar.utils import ImportStringWithParams, normalize_hostname, render_template
 
 from .agents import Agent, DefaultAgent
 from .authenticators import Authenticator
@@ -77,10 +78,33 @@ def _local_storage() -> Path:
     return p
 
 
+class DatabaseConfig(BaseModel, RenderableConfigMixin):
+    dsn: str = Field(default_factory=lambda: f"sqlite:///{_local_storage() / 'state.db'}")
+
+
+class URLDataSourceConfig(BaseModel, RenderableConfigMixin):
+    enabled: bool = False
+    allowlist: Allowlist = Field(default_factory=list)
+    timeout: timedelta = timedelta(seconds=30)
+
+    @field_validator("allowlist", mode="after")
+    @classmethod
+    def _normalize_allowlist_entries(cls, allowlist: list[str]) -> list[str]:
+        if "*" in allowlist:
+            return allowlist
+
+        return [normalize_hostname(entry) for entry in allowlist]
+
+
+class FileStorageConfig(BaseModel, RenderableConfigMixin):
+    path: UPath = Field(default_factory=lambda: UPath(_local_storage() / "files"))
+    url_data_source: URLDataSourceConfig = Field(default_factory=URLDataSourceConfig)
+
+
 class StorageConfig(BaseModel, RenderableConfigMixin):
     enabled: bool = True
-    database_dsn: str = Field(default_factory=lambda: f"sqlite:///{_local_storage() / 'state.db'}")
-    file_storage_path: UPath = Field(default_factory=lambda: UPath(_local_storage() / "files"))
+    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
+    files: FileStorageConfig = Field(default_factory=FileStorageConfig)
 
 
 class DynamicAgentConfig(BaseModel, RenderableConfigMixin):

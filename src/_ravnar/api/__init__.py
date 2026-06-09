@@ -70,8 +70,8 @@ def _make_stateful_router(
     from _ravnar.file_storage import FileHandler
     from _ravnar.mixin import SetupTeardownMixin
 
-    database = Database(url=str(storage_config.database_dsn))
-    file_handler = FileHandler(root=storage_config.file_storage_path, database=database)
+    database = Database(config=storage_config.database)
+    file_handler = FileHandler(config=storage_config.files, database=database)
 
     router = schema.APIRouter(
         tags=["Stateful"],
