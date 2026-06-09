@@ -227,51 +227,60 @@ def test_import_string_with_params_nested_error_localization():
 
 class TestImportStringWithParamsRestrictedContext:
     def test_allowed_env_var_renders(self, mocker):
-        mocker.patch.dict(os.environ, {"ALLOWED_VAR": "allowed_value"})
-        with ImportStringWithParams.explicit_render_template_context({"ALLOWED_VAR": "allowed_value"}):
+        var = "ALLOWED_VAR"
+        value = "allowed_value"
+
+        mocker.patch.dict(os.environ, {var: value})
+        with ImportStringWithParams.explicit_render_template_context({var: value}):
             result = ImportStringWithParams.model_validate(
                 {
-                    "cls_or_fn": f"{__name__}.{MockAgent.__name__}",
+                    "cls_or_fn": MockAgent,
                     "params": {"param": "{{ ALLOWED_VAR }}"},
                 }
             )
-            assert result.params["param"] == "allowed_value"
+            assert result.params["param"] == value
 
     def test_denied_env_var_raises_template_render_error(self, mocker):
-        mocker.patch.dict(os.environ, {"DENIED_VAR": "denied_value"})
-        with ImportStringWithParams.explicit_render_template_context({}):
-            with pytest.raises(pydantic.ValidationError) as exc_info:
-                ImportStringWithParams.model_validate(
-                    {
-                        "cls_or_fn": f"{__name__}.{MockAgent.__name__}",
-                        "params": {"param": "{{ DENIED_VAR }}"},
-                    }
-                )
-            errors = exc_info.value.errors()
-            assert any("Invalid configuration" in e["msg"] for e in errors)
+        var = "DENIED_VAR"
+        value = "denied_value"
+
+        mocker.patch.dict(os.environ, {var: value})
+        with (
+            ImportStringWithParams.explicit_render_template_context({}),
+            pytest.raises(pydantic.ValidationError, match="Invalid configuration"),
+        ):
+            ImportStringWithParams.model_validate(
+                {
+                    "cls_or_fn": MockAgent,
+                    "params": {"param": "{{ DENIED_VAR }}"},
+                }
+            )
 
     def test_security_error_in_restricted_context_raises_template_render_error(self, mocker):
         mocker.patch.dict(os.environ, {"SECRET": "secret_value"})
-        with ImportStringWithParams.explicit_render_template_context({"SECRET": "secret_value"}):
-            with pytest.raises(pydantic.ValidationError) as exc_info:
-                ImportStringWithParams.model_validate(
-                    {
-                        "cls_or_fn": f"{__name__}.{MockAgent.__name__}",
-                        "params": {"param": "{{ ''.__class__ }}"},
-                    }
-                )
-            errors = exc_info.value.errors()
-            assert any("Invalid configuration" in e["msg"] for e in errors)
+        with (
+            ImportStringWithParams.explicit_render_template_context({"SECRET": "secret_value"}),
+            pytest.raises(pydantic.ValidationError, match="Invalid configuration"),
+        ):
+            ImportStringWithParams.model_validate(
+                {
+                    "cls_or_fn": MockAgent,
+                    "params": {"param": "{{ ''.__class__ }}"},
+                }
+            )
 
     def test_no_context_falls_back_to_full_environ(self, mocker):
-        mocker.patch.dict(os.environ, {"FULL_VAR": "full_value"})
+        var = "FULL_VAR"
+        value = "full_value"
+
+        mocker.patch.dict(os.environ, {var: value})
         result = ImportStringWithParams.model_validate(
             {
-                "cls_or_fn": f"{__name__}.{MockAgent.__name__}",
+                "cls_or_fn": MockAgent,
                 "params": {"param": "{{ FULL_VAR }}"},
             }
         )
-        assert result.params["param"] == "full_value"
+        assert result.params["param"] == value
 
 
 class TestAllowlist:

@@ -269,7 +269,7 @@ class TestDynamicAgentsWithAllowedEnvVars:
             json={
                 "id": "allowed-env-agent",
                 "agent": {
-                    "cls_or_fn": f"tests.api.test_agents.{MockAgent.__name__}",
+                    "cls_or_fn": MockAgent,
                     "params": {"param": "{{ ALLOWED_VAR }}"},
                 },
             },
@@ -284,7 +284,7 @@ class TestDynamicAgentsWithAllowedEnvVars:
             json={
                 "id": "denied-env-agent",
                 "agent": {
-                    "cls_or_fn": f"tests.api.test_agents.{MockAgent.__name__}",
+                    "cls_or_fn": MockAgent,
                     "params": {"param": "{{ DENIED_VAR }}"},
                 },
             },

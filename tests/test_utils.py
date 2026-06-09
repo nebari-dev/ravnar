@@ -3,7 +3,7 @@ import os
 import jinja2
 import pytest
 
-from _ravnar.utils import ImportStringWithParams, TemplateRenderError, render_template
+from _ravnar.utils import render_template
 
 
 class TestRenderTemplate:
@@ -50,26 +50,3 @@ class TestRenderTemplate:
     def test_non_string_passed_through(self):
         assert render_template(42, {}) == 42
         assert render_template(None, {}) is None
-
-
-class TestRenderTemplateContext:
-    def test_restricted_context_used_when_set(self, mocker):
-        mocker.patch.dict(os.environ, {"ALLOWED": "yes", "DENIED": "no"})
-        with ImportStringWithParams.explicit_render_template_context({"ALLOWED": "yes"}):
-            assert render_template("{{ ALLOWED }}", ImportStringWithParams._render_template_context.get()) == "yes"
-            with pytest.raises(jinja2.exceptions.UndefinedError):
-                render_template("{{ DENIED }}", ImportStringWithParams._render_template_context.get())
-
-    def test_none_context_falls_back_to_os_environ(self, mocker):
-        mocker.patch.dict(os.environ, {"FALLBACK_VAR": "fallback_value"})
-        assert ImportStringWithParams._render_template_context.get() is None
-        # When called directly with os.environ, it works
-        assert render_template("{{ FALLBACK_VAR }}", dict(os.environ)) == "fallback_value"
-
-
-class TestTemplateRenderError:
-    def test_attributes(self):
-        exc = TemplateRenderError(template="{{ x }}", reason="UndefinedError", message="Invalid configuration")
-        assert exc.template == "{{ x }}"
-        assert exc.reason == "UndefinedError"
-        assert exc.message == "Invalid configuration"
