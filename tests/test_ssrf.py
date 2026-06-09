@@ -37,22 +37,22 @@ class TestNormalizeHostname:
 
 class TestURLDataSourceConfig:
     def test_allowlist_normalization(self) -> None:
-        config = URLDataSourceConfig(allowlist=["GITHUB.COM", "München.example.com"])
-        assert config.allowlist == ["github.com", "xn--mnchen-3ya.example.com"]
+        config = URLDataSourceConfig(allowed_hostnames=["GITHUB.COM", "München.example.com"])
+        assert config.allowed_hostnames == ["github.com", "xn--mnchen-3ya.example.com"]
 
     def test_wildcard_preserved(self) -> None:
-        config = URLDataSourceConfig(allowlist=["*"])
-        assert config.allowlist == ["*"]
+        config = URLDataSourceConfig(allowed_hostnames=["*"])
+        assert config.allowed_hostnames == ["*"]
 
     def test_wildcard_with_others_blocked(self) -> None:
         with pytest.raises(pydantic.ValidationError) as exc_info:
-            URLDataSourceConfig(allowlist=["*", "example.com"])
+            URLDataSourceConfig(allowed_hostnames=["*", "example.com"])
         assert "must be the sole" in str(exc_info.value)
 
     def test_invalid_allowlist_entry_raises(self) -> None:
         # Double dot creates an empty label which is invalid in IDNA
         with pytest.raises(pydantic.ValidationError):
-            URLDataSourceConfig(allowlist=["example..com"])
+            URLDataSourceConfig(allowed_hostnames=["example..com"])
 
     def test_timeout_default(self) -> None:
         config = URLDataSourceConfig()
@@ -74,74 +74,74 @@ class TestValidateURL:
         """
         allowlist: list[str] = []
         with pytest.raises(HTTPException) as exc_info:
-            FileHandler._validate_url("http://example.com/file", allowlist=allowlist)
+            FileHandler._validate_url("http://example.com/file", allowed_hostnames=allowlist)
         assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
 
     def test_exact_match(self) -> None:
-        result = FileHandler._validate_url("http://example.com/file", allowlist=["example.com"])
+        result = FileHandler._validate_url("http://example.com/file", allowed_hostnames=["example.com"])
         assert result == "http://example.com/file"
 
     def test_subdomain_match(self) -> None:
-        result = FileHandler._validate_url("http://sub.example.com/file", allowlist=["example.com"])
+        result = FileHandler._validate_url("http://sub.example.com/file", allowed_hostnames=["example.com"])
         assert result == "http://sub.example.com/file"
 
     def test_case_insensitive_match(self) -> None:
         # Allowlist entry is already normalized (lowercased) at config load time
-        result = FileHandler._validate_url("http://example.com/file", allowlist=["example.com"])
+        result = FileHandler._validate_url("http://example.com/file", allowed_hostnames=["example.com"])
         assert result == "http://example.com/file"
 
     def test_non_match(self) -> None:
         with pytest.raises(HTTPException) as exc_info:
-            FileHandler._validate_url("http://evil.com/file", allowlist=["example.com"])
+            FileHandler._validate_url("http://evil.com/file", allowed_hostnames=["example.com"])
         assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
 
     def test_wildcard_allows_all(self) -> None:
-        result = FileHandler._validate_url("http://evil.com/file", allowlist=["*"])
+        result = FileHandler._validate_url("http://evil.com/file", allowed_hostnames=["*"])
         assert result == "http://evil.com/file"
 
     def test_wildcard_allows_internal(self) -> None:
-        result = FileHandler._validate_url("http://169.254.169.254/latest/meta-data/", allowlist=["*"])
+        result = FileHandler._validate_url("http://169.254.169.254/latest/meta-data/", allowed_hostnames=["*"])
         assert result == "http://169.254.169.254/latest/meta-data/"
 
     def test_url_with_userinfo(self) -> None:
-        result = FileHandler._validate_url("http://user:pass@example.com/file", allowlist=["example.com"])
+        result = FileHandler._validate_url("http://user:pass@example.com/file", allowed_hostnames=["example.com"])
         assert result == "http://user:pass@example.com/file"
 
     def test_url_with_non_standard_port(self) -> None:
-        result = FileHandler._validate_url("http://example.com:8080/file", allowlist=["example.com"])
+        result = FileHandler._validate_url("http://example.com:8080/file", allowed_hostnames=["example.com"])
         assert result == "http://example.com:8080/file"
 
     def test_hostname_trailing_dot_not_matching(self) -> None:
         with pytest.raises(HTTPException) as exc_info:
-            FileHandler._validate_url("http://example.com./file", allowlist=["example.com"])
+            FileHandler._validate_url("http://example.com./file", allowed_hostnames=["example.com"])
         assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
 
     def test_ip_literal_not_in_allowlist(self) -> None:
         with pytest.raises(HTTPException) as exc_info:
-            FileHandler._validate_url("http://93.184.216.34/file", allowlist=["example.com"])
+            FileHandler._validate_url("http://93.184.216.34/file", allowed_hostnames=["example.com"])
         assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
 
     def test_ip_literal_in_allowlist(self) -> None:
-        result = FileHandler._validate_url("http://93.184.216.34/file", allowlist=["93.184.216.34"])
+        result = FileHandler._validate_url("http://93.184.216.34/file", allowed_hostnames=["93.184.216.34"])
         assert result == "http://93.184.216.34/file"
 
     def test_url_with_no_hostname(self) -> None:
         with pytest.raises(HTTPException) as exc_info:
-            FileHandler._validate_url("file:///etc/passwd", allowlist=["example.com"])
+            FileHandler._validate_url("file:///etc/passwd", allowed_hostnames=["example.com"])
         assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
 
     def test_idn_hostname_matching_idn_entry(self) -> None:
         # Config normalizes the IDN allowlist entry at load time
         result = FileHandler._validate_url(
             "http://MÜNCHEN.example.com/file",
-            allowlist=["xn--mnchen-3ya.example.com"],
+            allowed_hostnames=["xn--mnchen-3ya.example.com"],
         )
         assert result == "http://MÜNCHEN.example.com/file"
 
     def test_idn_hostname_matching_punycode_entry(self) -> None:
         result = FileHandler._validate_url(
             "http://MÜNCHEN.example.com/file",
-            allowlist=["xn--mnchen-3ya.example.com"],
+            allowed_hostnames=["xn--mnchen-3ya.example.com"],
         )
         assert result == "http://MÜNCHEN.example.com/file"
 
@@ -164,7 +164,7 @@ class TestValidateURLIntegration:
                     "files": {
                         "url_data_source": {
                             "enabled": True,
-                            "allowlist": [hostname],
+                            "allowed_hostnames": [hostname],
                         },
                     },
                 },

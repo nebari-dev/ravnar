@@ -84,16 +84,16 @@ class DatabaseConfig(BaseModel, RenderableConfigMixin):
 
 class URLDataSourceConfig(BaseModel, RenderableConfigMixin):
     enabled: bool = False
-    allowlist: Allowlist = Field(default_factory=list)
+    allowed_hostnames: Allowlist = Field(default_factory=list)
     timeout: timedelta = timedelta(seconds=30)
 
-    @field_validator("allowlist", mode="after")
+    @field_validator("allowed_hostnames", mode="after")
     @classmethod
-    def _normalize_allowlist_entries(cls, allowlist: list[str]) -> list[str]:
-        if "*" in allowlist:
-            return allowlist
+    def _normalize_allowlist_entries(cls, allowed_hostnames: list[str]) -> list[str]:
+        if "*" in allowed_hostnames:
+            return allowed_hostnames
 
-        return [normalize_hostname(entry) for entry in allowlist]
+        return [normalize_hostname(hostname) for hostname in allowed_hostnames]
 
 
 class FileStorageConfig(BaseModel, RenderableConfigMixin):

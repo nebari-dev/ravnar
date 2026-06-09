@@ -55,6 +55,11 @@ state — code quality varies across modules.
   automatically, no manual decorators needed
 - Run tests with `uv run pytest`
 
+## Documentation
+
+- Any change to the configuration schema (`src/_ravnar/config.py`) must include a corresponding update to the
+  configuration reference documentation (`docs/references/config.md`).
+
 ## Architecture & Patterns
 
 - All implementation code goes in `src/_ravnar/`. The `src/ravnar/` package contains only the CLI and selective
