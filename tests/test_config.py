@@ -9,7 +9,6 @@ from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, YamlConf
 
 from _ravnar.agents import Agent
 from _ravnar.config import AgentConfig, BaseConfig, Config, DynamicAgentConfig, ImportStringWithParams
-from _ravnar.utils import ImportStringWithParams
 
 
 @pytest.fixture()

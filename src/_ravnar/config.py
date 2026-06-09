@@ -3,15 +3,10 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from typing import Any, Self, TypeVar
+from typing import Annotated, Any, Self, TypeVar
 
 import l2sl
-from pydantic import (
-    BaseModel,
-    Field,
-    field_validator,
-    model_validator,
-)
+from pydantic import AfterValidator, BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict, YamlConfigSettingsSource
 from upath import UPath
 
@@ -25,6 +20,15 @@ T = TypeVar("T")
 
 def interactive_session() -> bool:
     return sys.stdout.isatty()
+
+
+def _validate_allowlist_wildcard(allowlist: list[str]) -> list[str]:
+    if "*" in allowlist and len(allowlist) > 1:
+        raise ValueError('Wildcard "*" must be the sole allowlist entry. It cannot be combined with other entries.')
+    return allowlist
+
+
+Allowlist = Annotated[list[str], AfterValidator(_validate_allowlist_wildcard)]
 
 
 class RenderableConfigMixin:
@@ -55,8 +59,8 @@ class ServerConfig(BaseModel, RenderableConfigMixin):
 
 
 class CORSConfig(BaseModel, RenderableConfigMixin):
-    allowed_origins: list[str] = Field(default_factory=lambda: ["*"])
-    allowed_headers: list[str] = Field(default_factory=list)
+    allowed_origins: Allowlist = Field(default_factory=lambda: ["*"])
+    allowed_headers: Allowlist = Field(default_factory=list)
 
 
 class SecurityConfig(BaseModel, RenderableConfigMixin):
@@ -81,7 +85,7 @@ class StorageConfig(BaseModel, RenderableConfigMixin):
 
 class DynamicAgentConfig(BaseModel, RenderableConfigMixin):
     enabled: bool = False
-    allowed_env_vars: list[str] = Field(default_factory=list)
+    allowed_env_vars: Allowlist = Field(default_factory=list)
 
 
 class AgentConfig(BaseModel, RenderableConfigMixin):
