@@ -21,7 +21,7 @@ from _ravnar import schema
 from _ravnar.events import EventProcessor
 from _ravnar.mixin import SetupTeardownMixin
 from _ravnar.observability import configure_logging, configure_tracing
-from _ravnar.security import SecurityHeadersMiddleware, make_authorized_user_factory
+from _ravnar.security import SecurityHeadersMiddleware, User, make_authorized_user_factory
 from _ravnar.utils import TemplateRenderError, as_awaitable
 
 from .api import make_router as make_api_router
@@ -207,6 +207,7 @@ class AgentHandler(SetupTeardownMixin):
         agent_id: str,
         run_agent_input: ag_ui.core.RunAgentInput,
         *,
+        user: User,
         callback: Callable[[EventProcessor], Awaitable[None]] | None = None,
     ) -> fastsse.Response:
         agent = self._get_agent(agent_id)
@@ -222,7 +223,7 @@ class AgentHandler(SetupTeardownMixin):
 
         async def event_stream() -> AsyncIterator[ag_ui.core.Event]:
             try:
-                async for event in event_processor.process_event_stream(agent.run(run_agent_input)):
+                async for event in event_processor.process_event_stream(agent.run(run_agent_input, user=user)):
                     yield event
 
                 if callback is not None:

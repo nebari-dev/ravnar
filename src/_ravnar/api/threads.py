@@ -142,7 +142,7 @@ def make_router(
             run = event_processor.extract(include_input_message_ids={m.id for m in data.messages})
             await database.create_run(run)
 
-        return await agent_handler.run(thread.agent_id, run_agent_input, callback=callback)
+        return await agent_handler.run(thread.agent_id, run_agent_input, user=user, callback=callback)
 
     @traced(name="file-hydration")
     async def hydrate_files(
