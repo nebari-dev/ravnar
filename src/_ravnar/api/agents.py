@@ -31,7 +31,7 @@ def make_router(*, agent_handler: AgentHandler, authorized_user_with: Callable[.
         run_agent_input: ag_ui.core.RunAgentInput,
         user: User = Depends(authorized_user_with("agents:read")),  # noqa: B008
     ) -> fastsse.Response:
-        return await agent_handler.run(agent_id, run_agent_input)
+        return await agent_handler.run(agent_id, run_agent_input, user=user)
 
     if agent_handler.dynamic_enabled:
         _make_dynamic_agents_router(router, agent_handler=agent_handler, authorized_user_with=authorized_user_with)

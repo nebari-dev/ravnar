@@ -116,6 +116,6 @@ class MockAgent(Agent):
     def __init__(self, param="unset"):
         self.param = param
 
-    async def run(self, input):
+    async def run(self, input, *, user):
         raise AssertionError
         yield

@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any
 import ag_ui.core
 import pydantic
 
+from _ravnar.security import User
+
 from .mixin import SetupTeardownMixin
 
 if TYPE_CHECKING:
@@ -24,7 +26,7 @@ class Agent(abc.ABC, SetupTeardownMixin):
     """Agent base class"""
 
     @abc.abstractmethod
-    def run(self, input: ag_ui.core.RunAgentInput) -> AsyncIterator[ag_ui.core.Event]: ...
+    def run(self, input: ag_ui.core.RunAgentInput, user: User) -> AsyncIterator[ag_ui.core.Event]: ...
 
     def get_capabilities(self) -> ag_ui.core.AgentCapabilities:
         """The capabilities of the agent."""
@@ -36,7 +38,7 @@ class Agent(abc.ABC, SetupTeardownMixin):
 
 
 class DefaultAgent(Agent):
-    async def run(self, input: ag_ui.core.RunAgentInput) -> AsyncIterator[ag_ui.core.Event]:
+    async def run(self, input: ag_ui.core.RunAgentInput, user: User) -> AsyncIterator[ag_ui.core.Event]:
         message_id = str(uuid.uuid4())
         message = """
         Hello, I'm ravnar's default agent.
@@ -97,7 +99,7 @@ class SSEAgent(_AgentBase):
 
         super().__init__(capabilities=capabilities, quick_prompts=quick_prompts)
 
-    async def run(self, input: ag_ui.core.RunAgentInput) -> AsyncIterator[ag_ui.core.Event]:
+    async def run(self, input: ag_ui.core.RunAgentInput, user: User) -> AsyncIterator[ag_ui.core.Event]:
         import httpx
         import httpx_sse
 
@@ -152,10 +154,10 @@ class PydanticAiAgentWrapper(Agent):
 
         self._capabilities = await self.extract_capabilities(self._agent)
 
-    def run(self, input: ag_ui.core.RunAgentInput) -> AsyncIterator[ag_ui.core.Event]:
+    def run(self, input: ag_ui.core.RunAgentInput, user: User) -> AsyncIterator[ag_ui.core.Event]:
         from pydantic_ai.ui.ag_ui import AGUIAdapter
 
-        return AGUIAdapter(agent=self._agent, run_input=input, accept="text/event-stream").run_stream()  # type: ignore[return-value]
+        return AGUIAdapter(agent=self._agent, run_input=input, accept="text/event-stream").run_stream(deps=user)  # type: ignore[return-value, arg-type]
 
     def get_capabilities(self) -> ag_ui.core.AgentCapabilities:
         """The capabilities of the agent."""
@@ -275,9 +277,24 @@ class AgnoAgentWrapper(_AgentBase):
 
         super().__init__(capabilities=capabilities, quick_prompts=quick_prompts)
 
-    def run(self, input: ag_ui.core.RunAgentInput) -> AsyncIterator[ag_ui.core.Event]:
+    def run(self, input: ag_ui.core.RunAgentInput, user: User) -> AsyncIterator[ag_ui.core.Event]:
         from agno.os.interfaces.agui.router import run_agent
 
+        # Inject user_id into forwarded_props so agno's run_agent() picks it up natively and passes it to
+        # agent.arun(user_id=...)
+        forwarded_props = dict(input.forwarded_props or {})
+        forwarded_props["user_id"] = user.id
+
+        # Put the full serialized User into session_state so tools can access it via ctx.session_state
+        state: dict[str, Any] = dict(input.state or {})
+        state["user"] = user.model_dump(mode="json")
+
+        input = input.model_copy(
+            update={
+                "forwarded_props": forwarded_props,
+                "state": state,
+            }
+        )
         return run_agent(self._agent, input)  # type: ignore[return-value]
 
     @staticmethod
