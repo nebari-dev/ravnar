@@ -52,7 +52,7 @@ spec:
             {{- if .Values.persistentFileStorage.enabled }}
             {{- include "ravnar.env.checkAndSet" (dict
               "envMap"  $envMap
-              "name"    "RAVNAR_STORAGE__FILE_STORAGE_PATH"
+              "name"    "RAVNAR_STORAGE__FILE_STORAGE__PATH"
               "value"   (dict "value" "/var/ravnar/files")
               "message" "Set persistentFileStorage.enabled=false if you must override."
             ) -}}
@@ -78,7 +78,7 @@ spec:
             {{- end }}
             {{- include "ravnar.env.checkAndSet" (dict
               "envMap"  $envMap
-              "name"    "RAVNAR_STORAGE__DATABASE_DSN"
+              "name"    "RAVNAR_STORAGE__DATABASE__DSN"
               "value"   (dict "value" (printf "postgresql+psycopg://%s:%s@%s:%s/%s"
                           (include "ravnar.env.templateLiteral" "POSTGRES_USERNAME")
                           (include "ravnar.env.templateLiteral" "POSTGRES_PASSWORD")
