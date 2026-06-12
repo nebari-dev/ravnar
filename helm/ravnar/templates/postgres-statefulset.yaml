@@ -22,6 +22,10 @@ spec:
       securityContext:
         {{- . | toYaml | nindent 8 }}
       {{- end }}
+      {{- with .Values.image.pullSecret }}
+      imagePullSecrets:
+        - name: {{ . }}
+      {{- end }}
       containers:
         - name: {{ $component }}
           image: "{{ tpl .Values.postgres.image.repository . }}:{{ tpl .Values.postgres.image.tag . }}"
