@@ -13,6 +13,8 @@ image:
   tag: ""
   # -- The pull policy for the main application image
   pullPolicy: IfNotPresent
+  # -- The name of an image pull secret to use for authenticating with the container registry
+  pullSecret: ""
 
 securityContext:
   pod:
@@ -87,6 +89,8 @@ postgres:
     tag: "16-alpine"
     # -- The pull policy for the PostgreSQL image
     pullPolicy: IfNotPresent
+    # -- The name of an image pull secret to use for authenticating with the container registry
+    pullSecret: ""
   # -- Security context for the PostgreSQL pod and container
   # FIXME: Define appropriate security context
   securityContext:

@@ -112,6 +112,10 @@
         "pullPolicy": {
           "type": "string",
           "enum": ["Always", "IfNotPresent", "Never"]
+        },
+        "pullSecret": {
+          "type": "string",
+          "description": "The name of an image pull secret to use for authenticating with the container registry."
         }
       }
     },
