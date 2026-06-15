@@ -1,9 +1,9 @@
-__all__ = ["Ravnar", "__version__", "agents", "authenticators"]
+__all__ = ["Ravnar", "__version__", "agents", "authenticators", "observability"]
 
 from _ravnar import __version__
 from _ravnar.core import Ravnar
 
-from . import agents, authenticators
+from . import agents, authenticators, observability
 
 # isort: split
 

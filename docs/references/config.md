@@ -193,6 +193,10 @@ A path prefix handled by a proxy that is not seen by the server.
 
 {{ config_options(["server", "root_path"]) }}
 
+### Observability
+
+Observability configuration comprising logging and tracing.
+
 #### Logging
 
 ##### Level
@@ -205,7 +209,7 @@ Minimum level for log messages. Can be one of
 - `"error"`
 - `"critical"`
 
-{{ config_options(["server", "logging", "level"]) }}
+{{ config_options(["observability", "logging", "level"]) }}
 
 ##### As JSON
 
@@ -215,25 +219,21 @@ Whether log messages should be emitted as JSON objects instead a human-readable 
 
     Defaults to `false` in an interactive session.
 
-{{ config_options(["server", "logging", "as_json"]) }}
+{{ config_options(["observability", "logging", "as_json"]) }}
 
 #### Tracing
 
-##### Endpoint
+##### Span Processors
 
-[OpenTelemetry collector](https://opentelemetry.io/docs/collector/) endpoint.
-
-{{ config_options(["server", "tracing", "endpoint"]) }}
-
-##### As Logs
-
-Whether traces should be emitted as part of the logs.
+List of [span processors](https://opentelemetry.io/docs/concepts/signals/traces/#span-processors) configured as
+[plugins](#plugins).
 
 !!! note
 
-    Defaults to `true` in an interactive session if not [endpoint](#endpoint) is defined.
+    Defaults to exporting spans to the console using [ravnar.observability.StructlogSpanExporter][] in interactive
+    sessions and otherwise no span processing.
 
-{{ config_options(["server", "tracing", "as_logs"]) }}
+{{ config_options(["observability", "tracing", "span_processors"]) }}
 
 ### Security
 

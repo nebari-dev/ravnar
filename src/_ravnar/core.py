@@ -17,10 +17,9 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response
 from opentelemetry import trace
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
-from _ravnar import schema
+from _ravnar import observability, schema
 from _ravnar.events import EventProcessor
 from _ravnar.mixin import SetupTeardownMixin
-from _ravnar.observability import configure_logging, configure_tracing
 from _ravnar.security import SecurityHeadersMiddleware, User, make_authorized_user_factory
 from _ravnar.utils import TemplateRenderError, as_awaitable
 
@@ -39,8 +38,7 @@ class Ravnar:
         if config is None:
             config = Config.parse()
 
-        configure_logging(config)
-        configure_tracing(config)
+        observability.configure(config.observability)
 
         self.config = config
         self.app = self._make_app(config)
