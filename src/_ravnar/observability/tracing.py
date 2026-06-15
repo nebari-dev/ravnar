@@ -14,10 +14,7 @@ from fastapi import HTTPException
 from opentelemetry import trace
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
-from opentelemetry.sdk.trace.export import (
-    SpanExporter,
-    SpanExportResult,
-)
+from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
 from _ravnar.version import __version__
 
@@ -110,6 +107,8 @@ def traced(
 
 
 class StructlogSpanExporter(SpanExporter):
+    """structlog span exporter"""
+
     def __init__(self) -> None:
         self._logger = structlog.get_logger()
 
