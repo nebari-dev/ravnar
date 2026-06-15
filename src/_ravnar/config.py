@@ -7,14 +7,14 @@ from pathlib import Path
 from typing import Annotated, Any, Self, TypeVar
 
 import l2sl
+import opentelemetry.sdk.trace
 from pydantic import AfterValidator, BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict, YamlConfigSettingsSource
 from upath import UPath
 
+from _ravnar.agents import Agent
+from _ravnar.authenticators import Authenticator
 from _ravnar.utils import ImportStringWithParams, normalize_hostname, render_template
-
-from .agents import Agent, DefaultAgent
-from .authenticators import Authenticator
 
 T = TypeVar("T")
 
@@ -39,22 +39,42 @@ class RenderableConfigMixin:
         return render_template(data, context=dict(os.environ))
 
 
-class LoggingConfig(BaseModel, RenderableConfigMixin):
-    level: l2sl.LogLevel = l2sl.LogLevel("info")
-    as_json: bool = Field(default_factory=lambda: not interactive_session())
-
-
-class TracingConfig(BaseModel, RenderableConfigMixin):
-    endpoint: str | None = None
-    as_logs: bool = Field(default_factory=lambda values: interactive_session() and values["endpoint"] is None)
-
-
 class ServerConfig(BaseModel, RenderableConfigMixin):
     hostname: str = "127.0.0.1"
     port: int = 8000
     proxy_headers: bool = False
     forwarded_allow_ips: list[str] = Field(default_factory=lambda: ["*"])
     root_path: str = ""
+
+
+class LoggingConfig(BaseModel, RenderableConfigMixin):
+    level: l2sl.LogLevel = l2sl.LogLevel("info")
+    as_json: bool = Field(default_factory=lambda: not interactive_session())
+
+
+def default_tracing_span_processors() -> list[ImportStringWithParams[opentelemetry.sdk.trace.SpanProcessor]]:
+    if not interactive_session():
+        return []
+
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+
+    from ravnar.observability import StructlogSpanExporter
+
+    return [
+        ImportStringWithParams(
+            cls_or_fn=SimpleSpanProcessor,
+            params={"span_exporter": ImportStringWithParams(cls_or_fn=StructlogSpanExporter)},
+        )
+    ]
+
+
+class TracingConfig(BaseModel, RenderableConfigMixin):
+    span_processors: list[ImportStringWithParams[opentelemetry.sdk.trace.SpanProcessor]] = Field(
+        default_factory=default_tracing_span_processors
+    )
+
+
+class ObservabilityConfig(BaseModel, RenderableConfigMixin):
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     tracing: TracingConfig = Field(default_factory=TracingConfig)
 
@@ -112,12 +132,14 @@ class DynamicAgentConfig(BaseModel, RenderableConfigMixin):
     allowed_env_vars: Allowlist = Field(default_factory=list)
 
 
+def default_static_agents() -> dict[str, ImportStringWithParams[Agent]]:
+    from ravnar.agents import DefaultAgent
+
+    return {"default": ImportStringWithParams(cls_or_fn=DefaultAgent)}
+
+
 class AgentConfig(BaseModel, RenderableConfigMixin):
-    static: dict[str, ImportStringWithParams[Agent]] = Field(
-        default_factory=lambda: {  # type: ignore[arg-type]
-            "default": ImportStringWithParams(cls_or_fn=DefaultAgent),
-        }
-    )
+    static: dict[str, ImportStringWithParams[Agent]] = Field(default_factory=default_static_agents)
     dynamic: DynamicAgentConfig = Field(default_factory=DynamicAgentConfig)
 
     @model_validator(mode="after")
@@ -129,6 +151,7 @@ class AgentConfig(BaseModel, RenderableConfigMixin):
 
 class BaseConfig(BaseSettings, RenderableConfigMixin):
     server: ServerConfig = Field(default_factory=ServerConfig)
+    observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
 
