@@ -15,6 +15,7 @@ import pydantic
 import structlog
 from opentelemetry import trace
 
+from _ravnar import schema
 from _ravnar.file_storage import WrappedMetadata
 from _ravnar.observability import LazyValue
 
@@ -74,7 +75,7 @@ class ReasoningData:
 
 
 class EventProcessor:
-    def __init__(self, *, run_agent_input: ag_ui.core.RunAgentInput):
+    def __init__(self, *, run_agent_input: schema.AugmentedRunAgentInput):
         self._run_agent_input = run_agent_input
 
         self._state = run_agent_input.state
@@ -94,7 +95,7 @@ class EventProcessor:
             parent_run_id=run_agent_input.parent_run_id,
         )
 
-    def _convert_input_messages(self, messages: list[ag_ui.core.Message]) -> dict[str, orm.Message]:
+    def _convert_input_messages(self, messages: list[schema.AugmentedMessage]) -> dict[str, orm.Message]:
         message_uids = {m.id: uuid.uuid4() for m in messages}
 
         tool_calls = {

@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Callable
 from typing import TYPE_CHECKING, Annotated, Any
 
-import ag_ui.core
 import fastsse
 from fastapi import Depends, Path
 
@@ -28,7 +27,7 @@ def make_router(*, agent_handler: AgentHandler, authorized_user_with: Callable[.
     async def create_stateless_run(
         *,
         agent_id: Annotated[str, Path(alias="agentId")],
-        run_agent_input: ag_ui.core.RunAgentInput,
+        run_agent_input: schema.AugmentedRunAgentInput,
         user: User = Depends(authorized_user_with("agents:read")),  # noqa: B008
     ) -> fastsse.Response:
         return await agent_handler.run(agent_id, run_agent_input, user=user)
