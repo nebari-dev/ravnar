@@ -281,3 +281,19 @@ class TestDynamicAgentsWithAllowedEnvVars:
         )
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json()["detail"] == "Invalid configuration"
+
+
+class TestStatelessRun:
+    def test_smoke(self, app_client):
+        app_client.post(
+            f"/api/agents/{app_client.any_agent_id}/run",
+            json={
+                "threadId": "thread-id",
+                "runId": "run-id",
+                "state": {},
+                "messages": [{"id": "message-id", "role": "user", "content": "hello"}],
+                "tools": [],
+                "context": [],
+                "forwardedProps": {},
+            },
+        ).raise_for_status()

@@ -119,20 +119,19 @@ def make_router(
             user_id=user.id, thread_id=thread_id, run_id=data.parent_run_id
         )
 
-        augmented_messages_ta = pydantic.TypeAdapter(list[schema.AugmentedMessage])
-        augmented_messages = augmented_messages_ta.validate_python(parent_messages, from_attributes=True)
-        augmented_messages.extend(data.messages)
+        messages = [
+            *pydantic.TypeAdapter(list[schema.AugmentedMessage]).validate_python(parent_messages, from_attributes=True),
+            *data.messages,
+        ]
 
-        await hydrate_files(augmented_messages, user=user, file_handler=file_handler)
+        await hydrate_files(messages, user=user, file_handler=file_handler)
 
-        run_agent_input = ag_ui.core.RunAgentInput(
+        run_agent_input = schema.AugmentedRunAgentInput(
             thread_id=thread_id,
             run_id=data.id,
             parent_run_id=parent_run.id if parent_run is not None else None,
             state=parent_run.state if parent_run is not None else None,
-            messages=pydantic.TypeAdapter(list[ag_ui.core.Message]).validate_python(
-                augmented_messages_ta.dump_python(augmented_messages)
-            ),
+            messages=messages,
             tools=data.tools,
             context=data.context,
             forwarded_props=data.forwarded_props,

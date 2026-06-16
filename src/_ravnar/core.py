@@ -203,7 +203,7 @@ class AgentHandler(SetupTeardownMixin):
     async def run(
         self,
         agent_id: str,
-        run_agent_input: ag_ui.core.RunAgentInput,
+        run_agent_input: schema.AugmentedRunAgentInput,
         *,
         user: User,
         callback: Callable[[EventProcessor], Awaitable[None]] | None = None,

@@ -8,6 +8,7 @@ __all__ = [
     "AugmentedDeveloperMessage",
     "AugmentedMessage",
     "AugmentedReasoningMessage",
+    "AugmentedRunAgentInput",
     "AugmentedSystemMessage",
     "AugmentedToolMessage",
     "AugmentedUserMessage",
@@ -16,6 +17,7 @@ __all__ = [
     "DeleteThreadsData",
     "Event",
     "QuickPrompt",
+    "RegisterAgentData",
     "RenameThreadData",
     "Run",
     "Thread",
@@ -175,6 +177,11 @@ AugmentedMessage = Annotated[
     | AugmentedReasoningMessage,
     Field(discriminator="role"),
 ]
+
+
+class AugmentedRunAgentInput(ag_ui.core.RunAgentInput):
+    messages: list[AugmentedMessage]  # type: ignore[assignment]
+
 
 Event = Annotated[ag_ui.core.Event, Field(title="Event")]
 
