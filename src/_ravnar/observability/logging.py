@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 
 def configure_logging(config: LoggingConfig) -> None:
+    show_locals = config.level <= "debug"
     suppress_locals: list[types.ModuleType | str] = [
         anyio,
         fastapi,
@@ -65,14 +66,16 @@ def configure_logging(config: LoggingConfig) -> None:
             *(
                 [  # type: ignore[list-item]
                     structlog.processors.ExceptionRenderer(
-                        structlog.processors.ExceptionDictTransformer(suppress=suppress_locals)
+                        structlog.processors.ExceptionDictTransformer(show_locals=show_locals, suppress=suppress_locals)
                     ),
                     structlog.processors.JSONRenderer(),
                 ]
                 if config.as_json
                 else [
                     structlog.dev.ConsoleRenderer(
-                        exception_formatter=structlog.dev.RichTracebackFormatter(suppress=suppress_locals)
+                        exception_formatter=structlog.dev.RichTracebackFormatter(
+                            show_locals=show_locals, suppress=suppress_locals
+                        )
                     ),
                 ]
             ),
