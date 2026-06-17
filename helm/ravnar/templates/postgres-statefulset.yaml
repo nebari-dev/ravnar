@@ -16,12 +16,12 @@ spec:
   template:
     metadata:
       annotations:
-        {{- with .Values.podAnnotations }}
+        {{- with .Values.postgres.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
       labels:
         {{- include "ravnar.labels" (dict "top" . "component" $component) | nindent 8 }}
-        {{- with .Values.podLabels }}
+        {{- with .Values.postgres.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
