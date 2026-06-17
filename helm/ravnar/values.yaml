@@ -6,6 +6,11 @@ fullnameOverride: ""
 # -- Number of replicas for the main application pod
 replicaCount: 1
 
+# -- Annotations to add to the pod metadata
+podAnnotations: {}
+# -- Extra labels to add to the pod metadata
+podLabels: {}
+
 image:
   # -- The repository of the main application image
   repository: quay.io/nebari/ravnar

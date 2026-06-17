@@ -12,6 +12,14 @@
     "replicaCount": {
       "type": "integer"
     },
+    "podAnnotations": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "podLabels": {
+      "type": "object",
+      "additionalProperties": true
+    },
     "config": {
       "type": "object",
       "properties": {
