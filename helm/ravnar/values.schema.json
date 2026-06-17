@@ -12,6 +12,12 @@
     "replicaCount": {
       "type": "integer"
     },
+    "podAnnotations": {
+      "$ref": "#/$defs/podAnnotations"
+    },
+    "podLabels": {
+      "$ref": "#/$defs/podLabels"
+    },
     "config": {
       "type": "object",
       "properties": {
@@ -92,6 +98,12 @@
         },
         "storage": {
           "type": "string"
+        },
+        "podAnnotations": {
+          "$ref": "#/$defs/podAnnotations"
+        },
+        "podLabels": {
+          "$ref": "#/$defs/podLabels"
         },
         "password": {
           "anyOf": [{ "type": "object", "maxProperties": 0 }, { "$ref": "#/$defs/envEntry" }]
@@ -226,6 +238,14 @@
           "type": "integer"
         }
       }
+    },
+    "podAnnotations": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "podLabels": {
+      "type": "object",
+      "additionalProperties": true
     }
   }
 }

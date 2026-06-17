@@ -15,8 +15,15 @@ spec:
       {{- include "ravnar.selectorLabels" (dict "top" . "component" $component) | nindent 6 }}
   template:
     metadata:
+      annotations:
+        {{- with .Values.postgres.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       labels:
         {{- include "ravnar.labels" (dict "top" . "component" $component) | nindent 8 }}
+        {{- with .Values.postgres.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
       {{- with .Values.postgres.securityContext.pod }}
       securityContext:
