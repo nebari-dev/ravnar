@@ -1,14 +1,11 @@
 # %% [markdown]
-# # Adding an agent to ravnar
+# # Configuring an agent in ravnar
 #
-# This tutorial explains how to add an agent to ravnar. You will see two approaches:
+# This tutorial explains how to configure an agent in ravnar. You will see two approaches:
 #
 # 1. **Full control** — subclassing the `Agent` ABC directly.
 # 2. **Using a wrapper** — adapting an existing [pydantic-ai](https://ai.pydantic.dev/) agent via
-#    `PydanticAiAgentWrapper`.
-#
-# Building on the wrapper, the final section shows how to give an agent the tools of an
-# [MCP](https://modelcontextprotocol.io/) server.
+#    `PydanticAiAgentWrapper`, and giving it the tools of an [MCP](https://modelcontextprotocol.io/) server.
 #
 # pydantic-ai is used throughout as the example, but ravnar is not tied to it: under the hood ravnar is an AG-UI
 # server, so any agent that emits AG-UI events is a first-class citizen. Other built-in options are summarised at the
