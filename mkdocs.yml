@@ -69,6 +69,7 @@ nav:
   - Deployment: deploy.md
   - Tutorials:
       - Authentication: tutorials/authentication.py
+      - Adding an agent: tutorials/agents.py
   - References:
       - Configuration: references/config.md
       - Python API: references/python_api.md
