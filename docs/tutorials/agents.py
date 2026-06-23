@@ -240,8 +240,9 @@ run_agent(client, "pydantic-whoami", "Who am I?")
 # [`MCPToolset`](https://ai.pydantic.dev/mcp/client/), and because the wrapper introspects the agent's `toolsets`,
 # those tools are discovered and called exactly like `whoami` — no extra wiring on the ravnar side.
 #
-# One difference matters: an MCP server runs as a *separate process* (or a remote service), so its tools cannot access
-# ravnar's injected `User`. Reach for an in-process tool when it needs the caller's identity, and an MCP server when
+# One difference matters: an MCP server runs as a *separate process* (or a remote service), so its tools don't
+# automatically receive ravnar's injected `User` the way an in-process tool does — though you can forward it
+# explicitly if needed. Reach for an in-process tool when a tool needs the caller's identity, and an MCP server when
 # the capability is self-contained.
 #
 # Let's write a minimal stdio MCP server that exposes a single `add` tool. In a real project this would be a separate
