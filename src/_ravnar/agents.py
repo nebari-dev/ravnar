@@ -50,7 +50,7 @@ class DefaultAgent(Agent):
             thread_id=input.thread_id, run_id=input.run_id, parent_run_id=input.parent_run_id
         )
         yield ag_ui.core.TextMessageStartEvent(message_id=message_id)
-        for delta in re.findall(r'\s*\S+', textwrap.dedent(message.strip())):
+        for delta in re.findall(r"\s*\S+", textwrap.dedent(message.strip())):
             yield ag_ui.core.TextMessageContentEvent(message_id=message_id, delta=delta)
         yield ag_ui.core.TextMessageEndEvent(message_id=message_id)
         yield ag_ui.core.RunFinishedEvent(thread_id=input.thread_id, run_id=input.run_id)

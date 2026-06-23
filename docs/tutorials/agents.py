@@ -45,7 +45,9 @@ def run_agent(client, agent_id: str, message: str) -> None:
         ],
     }
 
-    with httpx_sse.connect_sse(client, "POST", f"/api/agents/{agent_id}/run", json=body) as event_source:
+    with httpx_sse.connect_sse(
+        client, "POST", f"/api/agents/{agent_id}/run", json=body
+    ) as event_source:
         text = ""
         for sse in event_source.iter_sse():
             event = json.loads(sse.data)
@@ -96,10 +98,14 @@ class WhoAmIAgent(Agent):
 
         text = f"Hello, {user.id}!"
         for word in text.split():
-            yield ag_ui.core.TextMessageContentEvent(message_id=message_id, delta=word + " ")
+            yield ag_ui.core.TextMessageContentEvent(
+                message_id=message_id, delta=word + " "
+            )
 
         yield ag_ui.core.TextMessageEndEvent(message_id=message_id)
-        yield ag_ui.core.RunFinishedEvent(thread_id=input.thread_id, run_id=input.run_id)
+        yield ag_ui.core.RunFinishedEvent(
+            thread_id=input.thread_id, run_id=input.run_id
+        )
 
 
 # %% [markdown]
