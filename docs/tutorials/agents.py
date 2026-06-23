@@ -7,6 +7,9 @@
 # 2. **Using a wrapper** — adapting an existing [pydantic-ai](https://ai.pydantic.dev/) agent via
 #    [`PydanticAiAgentWrapper`][ravnar.agents.PydanticAiAgentWrapper].
 #
+# Building on the wrapper, the final section shows how to give an agent the tools of an
+# [MCP](https://modelcontextprotocol.io/) server.
+#
 # A special `Client` is used for the documentation. For real-world scenarios, it can be substituted with a regular HTTP
 # client with the base URL set to the URL of your ravnar deployment.
 
@@ -72,8 +75,8 @@ def run_agent(client, agent_id: str, message: str) -> None:
 # %%
 import ag_ui.core
 
-from _ravnar.agents import Agent
-from _ravnar.security import User
+from ravnar.agents import Agent
+from ravnar.authenticators import User
 
 
 class WhoAmIAgent(Agent):
@@ -212,15 +215,113 @@ print_json(agents)
 run_agent(client, "pydantic-whoami", "Who am I?")
 
 # %% [markdown]
-# The `TestModel` immediately invokes the `whoami` tool. The helper shows:
+# `TestModel` is pydantic-ai's stand-in for a real model: it exercises the full agent plumbing without calling an
+# LLM, and with `call_tools="all"` it invokes every available tool once. The helper shows:
 #
 # - `🛠  Calling tool: whoami` — the tool was invoked.
-# - `✅ agent` — the tool returned the user ID (your system username).
-# - The final message containing the tool's output in JSON format.
+# - `✅ agent` — the value returned by the tool, i.e. the user ID. Since no authenticator is configured, this is your
+#   system username.
+# - The final assistant message, which `TestModel` builds by echoing the tool's output as JSON.
 #
 # Because we used the config-driven approach, the entire agent lifecycle (model instantiation, tool registration,
 # wrapper setup) is handled automatically. In production you would swap `TestModel` for a real model
 # (e.g. `openai`, `anthropic`, `openrouter`) — everything else stays the same.
+
+# %% [markdown]
+# ## Connecting an MCP server
+#
+# [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) servers expose tools, resources, and prompts over
+# a standard protocol, so any MCP-compatible client can use them. pydantic-ai connects to an MCP server with
+# [`MCPToolset`](https://ai.pydantic.dev/mcp/client/), and because the wrapper introspects the agent's toolsets, the
+# server's tools are discovered and become callable exactly like the in-process `whoami` tool above — no extra wiring
+# on the ravnar side.
+#
+# One difference matters: an MCP server runs as a *separate process* (or a remote service), so its tools cannot access
+# ravnar's injected [`User`][ravnar.authenticators.User]. Reach for an in-process pydantic-ai tool when a tool needs
+# the caller's identity, and for an MCP server when the capability is self-contained.
+#
+# Let's write a minimal stdio MCP server that exposes a single `add` tool. In a real project this would be a separate
+# service; here we write it to a temporary file so the tutorial stays self-contained.
+
+# %%
+import pathlib
+import tempfile
+
+mcp_server = pathlib.Path(tempfile.mkdtemp()) / "calculator.py"
+mcp_server.write_text(
+    '''
+from mcp.server.fastmcp import FastMCP
+
+mcp = FastMCP("calculator")
+
+
+@mcp.tool()
+def add(a: int, b: int) -> int:
+    """Add two numbers."""
+    return a + b
+
+
+if __name__ == "__main__":
+    mcp.run()
+'''
+)
+
+# %% [markdown]
+# Now we declare an agent that connects to it. [`MCPToolset`](https://ai.pydantic.dev/mcp/client/) accepts the path to
+# a Python script and launches it as a stdio server (it also accepts a URL for a remote HTTP/SSE server). We add it to
+# the agent's `toolsets` through the same recursive config mechanism — no Python instantiation needed.
+
+# %%
+config = {
+    "agents": {
+        "static": {
+            "calculator": {
+                "cls_or_fn": "ravnar.agents.PydanticAiAgentWrapper",
+                "params": {
+                    "agent": {
+                        "cls_or_fn": "pydantic_ai.Agent",
+                        "params": {
+                            "model": {
+                                "cls_or_fn": "pydantic_ai.models.test.TestModel",
+                                "params": {"call_tools": "all"},
+                            },
+                            "toolsets": [
+                                {
+                                    "cls_or_fn": "pydantic_ai.mcp.MCPToolset",
+                                    "params": {"client": str(mcp_server)},
+                                }
+                            ],
+                        },
+                    },
+                },
+            },
+        },
+    },
+}
+client = Client(config)
+
+# %% [markdown]
+# During setup the wrapper connects to the MCP server and discovers its tools. The `add` tool appears in the
+# capabilities — this time *with* a parameter schema, unlike the argument-less `whoami`.
+
+# %%
+agents = client.get("/api/agents").raise_for_status().json()
+print_json(agents)
+
+# %% [markdown]
+# Let's run it.
+
+# %%
+run_agent(client, "calculator", "What is 2 + 3?")
+
+# %% [markdown]
+# `TestModel` calls `add` with placeholder arguments (`0` and `0`), so the result is `0` rather than `5` — it does
+# not read the operands from the message. A real model would call `add(a=2, b=3)` and get `5`. The point of the
+# example is the plumbing: ravnar connected to the MCP server, advertised its tools, and routed the tool call to it
+# with no code changes — only configuration.
+#
+# To connect to a server you do not run yourself (the common case), pass its URL instead of a script path, e.g.
+# `{"cls_or_fn": "pydantic_ai.mcp.MCPToolset", "params": {"client": "https://example.com/mcp"}}`.
 
 # %% [markdown]
 # ## Summary
@@ -231,4 +332,6 @@ run_agent(client, "pydantic-whoami", "Who am I?")
 #   ravnar plugs it in automatically.
 # - ravnar injects the [`User`][ravnar.authenticators.User] object into the agent's `run()` method. For pydantic-ai
 #   agents, it is available as `deps` in tools via `RunContext.deps`.
+# - Add [`MCPToolset`](https://ai.pydantic.dev/mcp/client/) to a pydantic-ai agent's `toolsets` to expose the tools of
+#   any MCP server; the wrapper discovers and streams them automatically.
 # - All agents are registered through the same configuration mechanism, whether they are custom subclasses or wrappers.
