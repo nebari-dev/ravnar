@@ -153,14 +153,15 @@ run_agent(client, "whoami", "Who am I?")
 # %% [markdown]
 # ## Using the Pydantic AI wrapper
 #
-# If you already use [pydantic-ai](https://ai.pydantic.dev/), you do not need to implement the `Agent`
-# interface yourself. ravnar ships with `PydanticAiAgentWrapper` that adapts any
-# `pydantic_ai.Agent` into a ravnar agent. It handles event generation, tool call streaming, and capability detection
-# automatically.
+# If you already use [pydantic-ai](https://ai.pydantic.dev/), you do not need to implement the `Agent` interface
+# yourself. ravnar ships with `PydanticAiAgentWrapper`, which adapts any `pydantic_ai.Agent` into a ravnar agent —
+# handling event generation, tool call streaming, and capability detection automatically.
 #
-# Let's build a pydantic-ai agent with a `whoami` tool that accesses the authenticated user. The tool is a regular
-# async function that takes `RunContext[User]` as its first parameter — ravnar injects the
-# `User` object as the dependency when the agent runs.
+# We'll give a single agent two kinds of tool: an in-process Python function, and the tools of an
+# [MCP](https://modelcontextprotocol.io/) server.
+#
+# First, the in-process tool. `whoami` is a regular async function that takes `RunContext[User]` as its first
+# parameter — ravnar injects the authenticated `User` as the dependency when the agent runs.
 
 # %%
 from pydantic_ai import RunContext
@@ -172,73 +173,9 @@ async def whoami(ctx: RunContext[User]) -> str:
 
 
 # %% [markdown]
-# Now we register the agent purely through the configuration — no Python instantiation needed. ravnar's
-# `ImportStringWithParams` mechanism resolves nested definitions recursively, so we can declare the entire agent
-# tree (model, tools, wrapper) as a single config block.
-
-# %%
-config = {
-    "agents": {
-        "static": {
-            "pydantic-whoami": {
-                "cls_or_fn": "ravnar.agents.PydanticAiAgentWrapper",
-                "params": {
-                    "agent": {
-                        "cls_or_fn": "pydantic_ai.Agent",
-                        "params": {
-                            "model": {
-                                "cls_or_fn": "pydantic_ai.models.test.TestModel",
-                                "params": {
-                                    "call_tools": "all",
-                                },
-                            },
-                            "deps_type": User,
-                            "tools": [whoami],
-                        },
-                    },
-                },
-            },
-        },
-    },
-}
-client = Client(config)
-
-# %% [markdown]
-# The wrapper automatically discovers the tool and reports it in the capabilities.
-
-# %%
-agents = client.get("/api/agents").raise_for_status().json()
-print_json(agents)
-
-# %% [markdown]
-# Notice the `whoami` tool is listed with its description and an empty parameter schema (it takes no arguments).
-# The `PydanticAiAgentWrapper` introspects the underlying pydantic-ai agent
-# to build the capability object dynamically via
-# `extract_capabilities()`.
-#
-# Let's run it.
-
-# %%
-run_agent(client, "pydantic-whoami", "Who am I?")
-
-# %% [markdown]
-# `TestModel` is pydantic-ai's stand-in for a real model: it exercises the full agent plumbing without calling an
-# LLM, and with `call_tools="all"` it invokes every available tool once. The helper shows:
-#
-# - `🛠  Calling tool: whoami` — the tool was invoked.
-# - `✅ agent` — the value returned by the tool, i.e. the user ID. Since no authenticator is configured, this is your
-#   system username.
-# - The final assistant message, which `TestModel` builds by echoing the tool's output as JSON.
-#
-# Because we used the config-driven approach, the entire agent lifecycle (model instantiation, tool registration,
-# wrapper setup) is handled automatically. In production you would swap `TestModel` for a real model
-# (e.g. `openai`, `anthropic`, `openrouter`) — everything else stays the same.
-
-# %% [markdown]
-# So far the agent's only tool is an in-process Python function. The wrapper can just as easily expose the tools of an
-# [MCP](https://modelcontextprotocol.io/) server: pydantic-ai connects to one with
-# [`MCPToolset`](https://ai.pydantic.dev/mcp/client/), and because the wrapper introspects the agent's `toolsets`,
-# those tools are discovered and called exactly like `whoami` — no extra wiring on the ravnar side.
+# Second, an MCP server. pydantic-ai connects to one with [`MCPToolset`](https://ai.pydantic.dev/mcp/client/), and
+# because the wrapper introspects the agent's `toolsets`, the server's tools are discovered and called exactly like
+# `whoami` — no extra wiring on the ravnar side.
 #
 # One difference matters: an MCP server runs as a *separate process* (or a remote service), so its tools don't
 # automatically receive ravnar's injected `User` the way an in-process tool does — though you can forward it
@@ -272,10 +209,10 @@ if __name__ == "__main__":
 )
 
 # %% [markdown]
-# Now we give the same agent both kinds of tool — the in-process `whoami` and the server's `add` — by adding an
-# [`MCPToolset`](https://ai.pydantic.dev/mcp/client/) to its `toolsets` alongside `tools`. It's the same recursive
-# config, no Python instantiation. `MCPToolset` takes the path to a script and launches it as a stdio server (it also
-# accepts a URL for a remote HTTP/SSE server).
+# Now we register the agent purely through configuration — no Python instantiation needed. ravnar's
+# `ImportStringWithParams` mechanism resolves nested definitions recursively, so we declare the whole agent tree —
+# model, wrapper, the in-process `tools`, and the MCP `toolsets` — as a single config block. `MCPToolset` takes the
+# path to a script and launches it as a stdio server (it also accepts a URL for a remote HTTP/SSE server).
 
 # %%
 config = {
@@ -309,24 +246,28 @@ config = {
 client = Client(config)
 
 # %% [markdown]
-# The capabilities now list *both* tools: the argument-less `whoami` and `add`, the latter with a parameter schema
-# introspected from the MCP server.
+# The wrapper builds the capability object dynamically by introspecting the underlying pydantic-ai agent (via
+# `extract_capabilities()`), so both tools show up: the argument-less `whoami`, and `add` with a parameter schema
+# discovered from the MCP server.
 
 # %%
 agents = client.get("/api/agents").raise_for_status().json()
 print_json(agents)
 
 # %% [markdown]
-# Let's run it. With `call_tools="all"`, `TestModel` exercises every tool — the in-process one and the MCP one.
+# Let's run it. `TestModel` is pydantic-ai's stand-in for a real model: it exercises the full agent plumbing without
+# calling an LLM, and with `call_tools="all"` it invokes every available tool once — both the in-process `whoami` and
+# the MCP `add`.
 
 # %%
 run_agent(client, "assistant", "What is 2 + 3, and who am I?")
 
 # %% [markdown]
-# `TestModel` calls each tool with placeholder arguments, so `add` returns `0` rather than `5` — it does not read the
-# operands from the message. A real model would call `add(a=2, b=3)`. The point is the plumbing: ravnar exposed an
-# in-process tool and an MCP server's tool through the same wrapper, advertised both, and routed the calls — with only
-# configuration.
+# `TestModel` calls each tool with placeholder arguments, so `add` returns `0` rather than `5`, and `whoami` returns
+# your system username (no authenticator is configured). A real model would read the message and call `add(a=2, b=3)`.
+# The point is the plumbing: ravnar exposed an in-process tool and an MCP server's tool through the *same* wrapper,
+# advertised both, and routed the calls — all from configuration. In production you would swap `TestModel` for a real
+# model (e.g. `openai`, `anthropic`, `openrouter`); everything else stays the same.
 #
 # To use a server you do not run yourself (the common case), pass its URL instead of a script path, e.g.
 # `{"cls_or_fn": "pydantic_ai.mcp.MCPToolset", "params": {"client": "https://example.com/mcp"}}`.
