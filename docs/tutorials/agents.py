@@ -238,17 +238,14 @@ run_agent(client, "pydantic-whoami", "Who am I?")
 # (e.g. `openai`, `anthropic`, `openrouter`) — everything else stays the same.
 
 # %% [markdown]
-# ## Connecting an MCP server
-#
-# [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) servers expose tools, resources, and prompts over
-# a standard protocol, so any MCP-compatible client can use them. pydantic-ai connects to an MCP server with
-# [`MCPToolset`](https://ai.pydantic.dev/mcp/client/), and because the wrapper introspects the agent's toolsets, the
-# server's tools are discovered and become callable exactly like the in-process `whoami` tool above — no extra wiring
-# on the ravnar side.
+# So far the agent's only tool is an in-process Python function. The wrapper can just as easily expose the tools of an
+# [MCP](https://modelcontextprotocol.io/) server: pydantic-ai connects to one with
+# [`MCPToolset`](https://ai.pydantic.dev/mcp/client/), and because the wrapper introspects the agent's `toolsets`,
+# those tools are discovered and called exactly like `whoami` — no extra wiring on the ravnar side.
 #
 # One difference matters: an MCP server runs as a *separate process* (or a remote service), so its tools cannot access
-# ravnar's injected `User`. Reach for an in-process pydantic-ai tool when a tool needs
-# the caller's identity, and for an MCP server when the capability is self-contained.
+# ravnar's injected `User`. Reach for an in-process tool when it needs the caller's identity, and an MCP server when
+# the capability is self-contained.
 #
 # Let's write a minimal stdio MCP server that exposes a single `add` tool. In a real project this would be a separate
 # service; here we write it to a temporary file so the tutorial stays self-contained.
@@ -277,15 +274,16 @@ if __name__ == "__main__":
 )
 
 # %% [markdown]
-# Now we declare an agent that connects to it. [`MCPToolset`](https://ai.pydantic.dev/mcp/client/) accepts the path to
-# a Python script and launches it as a stdio server (it also accepts a URL for a remote HTTP/SSE server). We add it to
-# the agent's `toolsets` through the same recursive config mechanism — no Python instantiation needed.
+# Now we give the same agent both kinds of tool — the in-process `whoami` and the server's `add` — by adding an
+# [`MCPToolset`](https://ai.pydantic.dev/mcp/client/) to its `toolsets` alongside `tools`. It's the same recursive
+# config, no Python instantiation. `MCPToolset` takes the path to a script and launches it as a stdio server (it also
+# accepts a URL for a remote HTTP/SSE server).
 
 # %%
 config = {
     "agents": {
         "static": {
-            "calculator": {
+            "assistant": {
                 "cls_or_fn": "ravnar.agents.PydanticAiAgentWrapper",
                 "params": {
                     "agent": {
@@ -295,6 +293,8 @@ config = {
                                 "cls_or_fn": "pydantic_ai.models.test.TestModel",
                                 "params": {"call_tools": "all"},
                             },
+                            "deps_type": User,
+                            "tools": [whoami],
                             "toolsets": [
                                 {
                                     "cls_or_fn": "pydantic_ai.mcp.MCPToolset",
@@ -311,26 +311,26 @@ config = {
 client = Client(config)
 
 # %% [markdown]
-# During setup the wrapper connects to the MCP server and discovers its tools. The `add` tool appears in the
-# capabilities — this time *with* a parameter schema, unlike the argument-less `whoami`.
+# The capabilities now list *both* tools: the argument-less `whoami` and `add`, the latter with a parameter schema
+# introspected from the MCP server.
 
 # %%
 agents = client.get("/api/agents").raise_for_status().json()
 print_json(agents)
 
 # %% [markdown]
-# Let's run it.
+# Let's run it. With `call_tools="all"`, `TestModel` exercises every tool — the in-process one and the MCP one.
 
 # %%
-run_agent(client, "calculator", "What is 2 + 3?")
+run_agent(client, "assistant", "What is 2 + 3, and who am I?")
 
 # %% [markdown]
-# `TestModel` calls `add` with placeholder arguments (`0` and `0`), so the result is `0` rather than `5` — it does
-# not read the operands from the message. A real model would call `add(a=2, b=3)` and get `5`. The point of the
-# example is the plumbing: ravnar connected to the MCP server, advertised its tools, and routed the tool call to it
-# with no code changes — only configuration.
+# `TestModel` calls each tool with placeholder arguments, so `add` returns `0` rather than `5` — it does not read the
+# operands from the message. A real model would call `add(a=2, b=3)`. The point is the plumbing: ravnar exposed an
+# in-process tool and an MCP server's tool through the same wrapper, advertised both, and routed the calls — with only
+# configuration.
 #
-# To connect to a server you do not run yourself (the common case), pass its URL instead of a script path, e.g.
+# To use a server you do not run yourself (the common case), pass its URL instead of a script path, e.g.
 # `{"cls_or_fn": "pydantic_ai.mcp.MCPToolset", "params": {"client": "https://example.com/mcp"}}`.
 
 # %% [markdown]
