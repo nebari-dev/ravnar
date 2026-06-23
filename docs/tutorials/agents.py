@@ -10,6 +10,10 @@
 # Building on the wrapper, the final section shows how to give an agent the tools of an
 # [MCP](https://modelcontextprotocol.io/) server.
 #
+# pydantic-ai is used throughout as the example, but ravnar is not tied to it: under the hood ravnar is an AG-UI
+# server, so any agent that emits AG-UI events is a first-class citizen. Other built-in options are summarised at the
+# end.
+#
 # A special `Client` is used for the documentation. For real-world scenarios, it can be substituted with a regular HTTP
 # client with the base URL set to the URL of your ravnar deployment.
 
@@ -340,4 +344,7 @@ run_agent(client, "calculator", "What is 2 + 3?")
 #   agents, it is available as `deps` in tools via `RunContext.deps`.
 # - Add [`MCPToolset`](https://ai.pydantic.dev/mcp/client/) to a pydantic-ai agent's `toolsets` to expose the tools of
 #   any MCP server; the wrapper discovers and streams them automatically.
+# - Not using pydantic-ai? ravnar also ships `AgnoAgentWrapper` for [Agno](https://docs.agno.com/) agents and
+#   `SSEAgent` to connect any agent that already speaks AG-UI over HTTP — and you can always implement the `Agent` ABC
+#   directly. See the Python API reference for the full list of built-in agents.
 # - All agents are registered through the same configuration mechanism, whether they are custom subclasses or wrappers.
