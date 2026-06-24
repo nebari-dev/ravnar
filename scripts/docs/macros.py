@@ -126,12 +126,17 @@ def on_pre_page_macros(env: MacrosPlugin) -> None:
 
     original = Path(env.page.file.abs_src_path).read_text()
 
+    # Compute a relative path to references/python_api/ so links work regardless of
+    # whether the site is hosted at the root or a sub-path (e.g. /latest/).
+    depth = len(env.page.url.rstrip("/").split("/"))
+    python_api_reference = "../" * depth + "references/python_api/"
+
     def replace_crossref(match: re.Match) -> str:
         display, target = match.group(1), match.group(2)
         if not target:
             display = f"`{display}`"
             target = match.group(1)
-        return f"[{display}](/references/python_api/#{target})"
+        return f"[{display}]({python_api_reference}#{target})"
 
     processed = re.sub(r"\[([^]]+)\]\[([^]]*)\]", replace_crossref, original)
 
