@@ -1,4 +1,5 @@
 import json
+import re
 import textwrap
 from pathlib import Path
 from typing import Any
@@ -8,6 +9,7 @@ import pygments.lexers
 import pygments.util
 import yaml
 from markupsafe import Markup
+from mkdocs_macros.plugin import MacrosPlugin
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 
 from _ravnar.config import Config
@@ -91,7 +93,7 @@ class ConfigOptionsRenderer:
         )
 
 
-def define_env(env):
+def define_env(env: MacrosPlugin):
     config_options_renderer = ConfigOptionsRenderer()
 
     env.macro(config_options_renderer.render, name="config_options")
@@ -108,3 +110,34 @@ def define_env(env):
                 language = lexer_cls.aliases[0]
 
         return Markup(code(content, language=language))
+
+
+def on_pre_page_macros(env: MacrosPlugin) -> None:
+    """Preprocess tutorial notebook files to resolve cross-reference links.
+
+    mkdocs-jupyter converts notebooks directly to HTML via nbconvert, bypassing the markdown pipeline where
+    autorefs/mkdocstrings would normally resolve [target][] and [display][target] cross-references. This hook patches
+    the page to point at a temp copy of the notebook with those links already resolved, so mkdocs-jupyter picks up the
+    processed version without touching the original source files.
+    """
+    src_path = env.page.file.src_path
+    if not (src_path.startswith("tutorials/") and src_path.endswith((".py", ".ipynb"))):
+        return
+
+    original = Path(env.page.file.abs_src_path).read_text()
+
+    def replace_crossref(match: re.Match) -> str:
+        display, target = match.group(1), match.group(2)
+        if not target:
+            display = f"`{display}`"
+            target = match.group(1)
+        return f"[{display}](/references/python_api/#{target})"
+
+    processed = re.sub(r"\[([^]]+)\]\[([^]]*)\]", replace_crossref, original)
+
+    temp_dir: Path = env.conf["build_temp_dir"] / "mkdocs-jupyter-crossref"
+    temp_dir.mkdir(exist_ok=True)
+
+    temp_file = temp_dir / Path(src_path).name
+    temp_file.write_text(processed)
+    env.page.file.abs_src_path = str(temp_file)

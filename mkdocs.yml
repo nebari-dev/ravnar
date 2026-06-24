@@ -36,6 +36,9 @@ plugins:
       execute: true
       include_source: True
 
+hooks:
+  - scripts/docs/hooks.py
+
 extra:
   analytics:
     provider: google
