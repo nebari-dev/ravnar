@@ -27,7 +27,9 @@ class Agent(abc.ABC, SetupTeardownMixin):
     """Agent base class"""
 
     @abc.abstractmethod
-    def run(self, input: ag_ui.core.RunAgentInput, user: User) -> AsyncIterator[ag_ui.core.Event]: ...
+    def run(self, input: ag_ui.core.RunAgentInput, user: User) -> AsyncIterator[ag_ui.core.Event]:
+        """Yield the stream of AG-UI events that make up the agent's response."""
+        ...
 
     def get_capabilities(self) -> ag_ui.core.AgentCapabilities:
         """The capabilities of the agent."""
@@ -172,6 +174,7 @@ class PydanticAiAgentWrapper(Agent):
     async def extract_capabilities(
         agent: pydantic_ai.Agent, *, ctx: pydantic_ai.RunContext | None = None
     ) -> ag_ui.core.AgentCapabilities:
+        """Detect the agent's capabilities by introspecting the underlying pydantic-ai agent."""
         import pydantic_ai.models
         from pydantic_ai.usage import RunUsage
 

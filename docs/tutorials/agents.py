@@ -76,9 +76,9 @@ def run_agent(client, agent_id: str, message: str) -> None:
 # Every integration in this tutorial is ultimately just a different way of producing that event stream.
 #
 # The [`Agent`][ravnar.agents.Agent] abstract base class is the most direct way to produce it, giving you complete
-# control over the agent's behaviour. You implement a single method, `run()`, which receives the incoming
+# control over the agent's behaviour. You implement a single method, [`run()`][ravnar.agents.Agent.run], which receives the incoming
 # `RunAgentInput` (the AG-UI request — messages, thread and run IDs, and any client-supplied tools and state) and the
-# authenticated `User`, and yields the `ag_ui.core.Event`s that make up the response.
+# authenticated [`User`][ravnar.authenticators.User], and yields the `ag_ui.core.Event`s that make up the response.
 #
 # Let's build a simple agent that greets the current user. The sequence below — start the run, open a text message,
 # stream its content word by word, end the message, finish the run — is the canonical shape of an AG-UI text response.
@@ -202,7 +202,7 @@ import tempfile
 mcp_server = pathlib.Path(tempfile.mkdtemp()) / "greeter.py"
 mcp_server.write_text(
     '''
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 
 mcp = FastMCP("greeter")
 
@@ -258,7 +258,7 @@ client = Client(config)
 
 # %% [markdown]
 # The wrapper builds the capability object dynamically by introspecting the underlying pydantic-ai agent (via
-# `extract_capabilities()`), so both tools show up: the in-process `whoami`, and `greet`, whose definition — name,
+# [`extract_capabilities()`][ravnar.agents.PydanticAiAgentWrapper.extract_capabilities]), so both tools show up: the in-process `whoami`, and `greet`, whose definition — name,
 # description, and (empty) parameter schema — was discovered from the MCP server.
 
 # %%
