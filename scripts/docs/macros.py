@@ -1,6 +1,6 @@
 import json
-import re
 import textwrap
+import xml.etree.ElementTree
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +9,7 @@ import pygments.lexers
 import pygments.util
 import yaml
 from markupsafe import Markup
+from mkdocs_autorefs import AutorefsInlineProcessor
 from mkdocs_macros.plugin import MacrosPlugin
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 
@@ -113,12 +114,12 @@ def define_env(env: MacrosPlugin):
 
 
 def on_pre_page_macros(env: MacrosPlugin) -> None:
-    """Preprocess tutorial notebook files to resolve cross-reference links.
+    """Convert cross-reference links in tutorial notebooks to autoref tags.
 
-    mkdocs-jupyter converts notebooks directly to HTML via nbconvert, bypassing the markdown pipeline where
-    autorefs/mkdocstrings would normally resolve [target][] and [display][target] cross-references. This hook patches
-    the page to point at a temp copy of the notebook with those links already resolved, so mkdocs-jupyter picks up the
-    processed version without touching the original source files.
+    mkdocs-jupyter converts notebooks directly to HTML via nbconvert, bypassing the markdown pipeline where autorefs
+    would normally convert [target][] and [display][target] syntax to <autoref> tags. This hook rewrites those
+    references as <autoref> tags in a temp copy of the notebook so that autorefs' later on_env fix_refs pass
+    can resolve them against local API anchors and external inventories.
     """
     src_path = env.page.file.src_path
     if not (src_path.startswith("tutorials/") and src_path.endswith((".py", ".ipynb"))):
@@ -126,19 +127,28 @@ def on_pre_page_macros(env: MacrosPlugin) -> None:
 
     original = Path(env.page.file.abs_src_path).read_text()
 
-    # Compute a relative path to references/python_api/ so links work regardless of
-    # whether the site is hosted at the root or a sub-path (e.g. /latest/).
-    depth = len(env.page.url.rstrip("/").split("/"))
-    python_api_reference = "../" * depth + "references/python_api/"
+    processor = AutorefsInlineProcessor()
+    idx = 0
+    parts = []
 
-    def replace_crossref(match: re.Match) -> str:
-        display, target = match.group(1), match.group(2)
-        if not target:
-            display = f"`{display}`"
-            target = match.group(1)
-        return f"[{display}]({python_api_reference}#{target})"
+    for match in processor.getCompiledRegExp().finditer(original):
+        text, index, handled = processor.getText(original, match.end(0))
+        if not handled:
+            continue
 
-    processed = re.sub(r"\[([^]]+)\]\[([^]]*)\]", replace_crossref, original)
+        m = processor.RE_LINK.match(original, pos=index)
+        if not m:
+            continue
+
+        identifier = m.group(1) or text
+
+        tag = processor._make_tag(identifier, text)
+        parts.append(original[idx : match.start(0)])
+        parts.append(xml.etree.ElementTree.tostring(tag, encoding="unicode"))
+        idx = m.end(0)
+
+    parts.append(original[idx:])
+    processed = "".join(parts)
 
     temp_dir: Path = env.conf["build_temp_dir"] / "mkdocs-jupyter-crossref"
     temp_dir.mkdir(exist_ok=True)
