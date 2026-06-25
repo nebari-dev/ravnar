@@ -1,5 +1,5 @@
 # %% [markdown]
-# # Configuring an agent in ravnar
+# # Configuring an agent
 #
 # This tutorial explains how to configure an agent in ravnar. You will see two approaches:
 #
@@ -9,7 +9,7 @@
 #    [MCP](https://modelcontextprotocol.io/) server.
 #
 # pydantic-ai is used throughout as the example, but ravnar is not tied to it: under the hood ravnar is an AG-UI
-# server, so any agent that emits AG-UI events is a first-class citizen. Other built-in options are summarised at the
+# server, so any agent that emits AG-UI events is a first-class citizen. Other built-in agents are covered at the
 # end.
 #
 # A special `Client` is used for the documentation. For real-world scenarios, it can be substituted with a regular HTTP
@@ -285,6 +285,15 @@ run_agent(client, "assistant", "Hello!")
 # `{"cls_or_fn": "pydantic_ai.mcp.MCPToolset", "params": {"client": "https://example.com/mcp"}}`.
 
 # %% [markdown]
+# ## Other built-in agents
+#
+# pydantic-ai is just one option. ravnar also ships [`AgnoAgentWrapper`][ravnar.agents.AgnoAgentWrapper] for
+# [Agno](https://docs.agno.com/) agents and [`SSEAgent`][ravnar.agents.SSEAgent] to connect any agent that already
+# speaks AG-UI over HTTP. You can also implement the [`Agent`][ravnar.agents.Agent] ABC directly, as in the first
+# section. See the [Python API reference](../../references/python_api/#ravnar.agents) for the full list of built-in
+# agents.
+
+# %% [markdown]
 # ## Summary
 #
 # - ravnar is an AG-UI server: an agent is anything that produces a stream of AG-UI events, however you choose to
@@ -297,8 +306,4 @@ run_agent(client, "assistant", "Hello!")
 #   agents, it is available as `deps` in tools via `RunContext.deps`.
 # - Add [`MCPToolset`](https://ai.pydantic.dev/mcp/client/) to a pydantic-ai agent's `toolsets` to expose the tools of
 #   any MCP server; the wrapper discovers and streams them automatically.
-# - Not using pydantic-ai? ravnar also ships [`AgnoAgentWrapper`][ravnar.agents.AgnoAgentWrapper] for
-#   [Agno](https://docs.agno.com/) agents and [`SSEAgent`][ravnar.agents.SSEAgent] to connect any agent that already
-#   speaks AG-UI over HTTP — and you can always implement the [`Agent`][ravnar.agents.Agent] ABC directly. See the
-#   Python API reference for the full list of built-in agents.
 # - All agents are registered through the same configuration mechanism, whether they are custom subclasses or wrappers.
