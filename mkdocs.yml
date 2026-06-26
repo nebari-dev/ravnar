@@ -15,6 +15,7 @@ plugins:
   - search
   - macros:
       module_name: scripts/docs/macros
+  - autorefs
   - mkdocstrings:
       default_handler: python
       handlers:
@@ -27,8 +28,8 @@ plugins:
             unwrap_annotated: true
           inventories:
             - https://docs.python.org/3/objects.inv
-            - https://docs.pydantic.dev/latest/objects.inv
-            - https://ai.pydantic.dev/objects.inv
+            - https://pydantic.dev/docs/validation/objects.inv
+            - https://pydantic.dev/docs/ai/objects.inv
   - gen-files:
       scripts:
         - scripts/docs/gen_files.py
