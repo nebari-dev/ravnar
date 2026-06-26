@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import abc
 import dataclasses
+import re
 import textwrap
 import uuid
 from collections.abc import AsyncIterator
@@ -26,7 +27,9 @@ class Agent(abc.ABC, SetupTeardownMixin):
     """Agent base class"""
 
     @abc.abstractmethod
-    def run(self, input: ag_ui.core.RunAgentInput, user: User) -> AsyncIterator[ag_ui.core.Event]: ...
+    def run(self, input: ag_ui.core.RunAgentInput, user: User) -> AsyncIterator[ag_ui.core.Event]:
+        """Yield the stream of AG-UI events that make up the agent's response."""
+        ...
 
     def get_capabilities(self) -> ag_ui.core.AgentCapabilities:
         """The capabilities of the agent."""
@@ -49,7 +52,7 @@ class DefaultAgent(Agent):
             thread_id=input.thread_id, run_id=input.run_id, parent_run_id=input.parent_run_id
         )
         yield ag_ui.core.TextMessageStartEvent(message_id=message_id)
-        for delta in textwrap.dedent(message.strip()).split():
+        for delta in re.findall(r"\s*\S+", textwrap.dedent(message.strip())):
             yield ag_ui.core.TextMessageContentEvent(message_id=message_id, delta=delta)
         yield ag_ui.core.TextMessageEndEvent(message_id=message_id)
         yield ag_ui.core.RunFinishedEvent(thread_id=input.thread_id, run_id=input.run_id)
@@ -171,6 +174,7 @@ class PydanticAiAgentWrapper(Agent):
     async def extract_capabilities(
         agent: pydantic_ai.Agent, *, ctx: pydantic_ai.RunContext | None = None
     ) -> ag_ui.core.AgentCapabilities:
+        """Detect the agent's capabilities by introspecting the underlying pydantic-ai agent."""
         import pydantic_ai.models
         from pydantic_ai.usage import RunUsage
 

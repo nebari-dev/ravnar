@@ -54,18 +54,21 @@ class Database(SetupTeardownMixin):
     async def setup(self) -> None:  # type: ignore[override]
         session_factory_params = SessionFactoryParams(expire_on_commit=False)
 
+        # ``SQLAlchemyInstrumentor`` is a global singleton: once it is instrumented, further ``instrument`` calls are a
+        # no-op that only logs an "already instrumented" warning. That happens whenever several engines are built in one
+        # process -- e.g. the executed docs build a fresh app per example -- so guard the call to keep the logs clean.
+        instrumentor = SQLAlchemyInstrumentor()
+
         if isinstance(self._engine, Engine):
-            SQLAlchemyInstrumentor().instrument(
-                engine=self._engine,
-            )
+            if not instrumentor.is_instrumented_by_opentelemetry:
+                instrumentor.instrument(engine=self._engine)
 
             orm.Base.metadata.create_all(bind=self._engine)
             self._session_factory = sessionmaker(bind=self._engine, **session_factory_params)
 
         else:
-            SQLAlchemyInstrumentor().instrument(
-                engine=self._engine.sync_engine,
-            )
+            if not instrumentor.is_instrumented_by_opentelemetry:
+                instrumentor.instrument(engine=self._engine.sync_engine)
 
             async with self._engine.begin() as conn:
                 await conn.run_sync(orm.Base.metadata.create_all)

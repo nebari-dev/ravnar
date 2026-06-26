@@ -61,6 +61,8 @@ Permission = Annotated[str, AfterValidator(_validate_permission)]
 
 
 class User(_BaseModel):
+    """An authenticated user: their identity, arbitrary data, and permissions."""
+
     id: str
     data: dict[str, Any] = Field(default_factory=dict)
     permissions: list[Permission] = Field(default_factory=list)

@@ -3,8 +3,11 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from _ravnar.core import Ravnar
+from _ravnar.security import User
 
 from .config import BaseConfig
+
+User._current_user = staticmethod(lambda: "Huginn")  # type: ignore[method-assign, assignment]
 
 _CLIENT: TestClient | None = None
 
