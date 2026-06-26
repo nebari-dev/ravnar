@@ -184,7 +184,7 @@ async def whoami(ctx: RunContext[User]) -> str:
 
 
 # %% [markdown]
-# Second, an MCP server. pydantic-ai connects to one with [`MCPToolset`](https://ai.pydantic.dev/mcp/client/), and
+# Second, an MCP server. pydantic-ai connects to one with [`MCPToolset`](https://ai.pydantic.dev/api/mcp/#pydantic_ai.mcp.MCPToolset), and
 # because the wrapper introspects the agent's `toolsets`, the server's tools are discovered and called exactly like
 # `whoami` — no extra wiring on the ravnar side.
 #
@@ -223,7 +223,7 @@ if __name__ == "__main__":
 # Now we register the agent purely through configuration — no Python instantiation needed. ravnar's
 # [configuration import mechanism](../../references/config/#plugins) resolves nested `cls_or_fn`/`params` definitions
 # recursively, so we declare the whole agent tree — model, wrapper, the in-process `tools`, and the MCP `toolsets` —
-# as a single config block. [`MCPToolset`](https://ai.pydantic.dev/mcp/client/) takes the path to a script and
+# as a single config block. [`MCPToolset`](https://ai.pydantic.dev/api/mcp/#pydantic_ai.mcp.MCPToolset) takes the path to a script and
 # launches it as a stdio server (it also accepts a URL for a remote HTTP/SSE server).
 
 # %%
@@ -289,7 +289,12 @@ run_agent(client, "assistant", "Hello!")
 # To use a server you do not run yourself (the common case), pass its URL instead of a script path:
 #
 # ```python
-# {"cls_or_fn": "pydantic_ai.mcp.MCPToolset", "params": {"client": "https://example.com/mcp"}}
+# "toolsets": [
+#     {
+#         "cls_or_fn": "pydantic_ai.mcp.MCPToolset",
+#         "params": {"client": "https://example.com/mcp"},
+#     }
+# ],
 # ```
 
 # %% [markdown]
@@ -313,6 +318,6 @@ run_agent(client, "assistant", "Hello!")
 # - ravnar injects the [`User`][ravnar.authenticators.User] object into the agent's `run()` method. For pydantic-ai
 #   agents, it is available as `deps` in tools via
 #   [`RunContext`](https://ai.pydantic.dev/api/tools/#pydantic_ai.tools.RunContext)`.deps`.
-# - Add [`MCPToolset`](https://ai.pydantic.dev/mcp/client/) to a pydantic-ai agent's `toolsets` to expose the tools of
+# - Add [`MCPToolset`](https://ai.pydantic.dev/api/mcp/#pydantic_ai.mcp.MCPToolset) to a pydantic-ai agent's `toolsets` to expose the tools of
 #   any MCP server; the wrapper discovers and streams them automatically.
 # - All agents are registered through the same configuration mechanism, whether they are custom subclasses or wrappers.
