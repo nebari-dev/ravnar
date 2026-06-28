@@ -45,12 +45,13 @@ def as_awaitable(fn: Callable[P, T] | Callable[P, Awaitable[T]], *args: P.args, 
 def as_async_iterator(
     fn: Callable[..., Iterator[T]] | Callable[..., AsyncIterator[T]], *args: Any, **kwargs: Any
 ) -> AsyncIterator[T]:
-    if inspect.isasyncgenfunction(fn):
-        fn = cast(Callable[..., AsyncIterator[T]], fn)
-        async_iterator = fn(*args, **kwargs)
+    any_iterator: Iterator[T] | AsyncIterator[T] = fn(*args, **kwargs)
+    if inspect.isasyncgen(any_iterator):
+        any_iterator = cast(AsyncIterator[T], any_iterator)
+        async_iterator = any_iterator
     else:
-        fn = cast(Callable[..., Iterator[T]], fn)
-        async_iterator = iterate_in_threadpool(fn(*args, **kwargs))
+        any_iterator = cast(Iterator[T], any_iterator)
+        async_iterator = iterate_in_threadpool(any_iterator)
 
     return async_iterator
 

@@ -21,7 +21,7 @@ from _ravnar import observability, schema
 from _ravnar.events import EventProcessor
 from _ravnar.mixin import SetupTeardownMixin
 from _ravnar.security import SecurityHeadersMiddleware, User, make_authorized_user_factory
-from _ravnar.utils import TemplateRenderError, as_awaitable
+from _ravnar.utils import TemplateRenderError, as_async_iterator, as_awaitable
 
 from .api import make_router as make_api_router
 from .config import AgentConfig, BaseConfig, Config
@@ -219,9 +219,15 @@ class AgentHandler(SetupTeardownMixin):
         if run_agent_input.parent_run_id is not None:
             span.set_attribute("parent_run_id", run_agent_input.parent_run_id)
 
-        async def event_stream() -> AsyncIterator[ag_ui.core.Event]:
+        async def event_stream(input: ag_ui.core.RunAgentInput) -> AsyncIterator[ag_ui.core.Event]:
             try:
-                async for event in event_processor.process_event_stream(agent.run(run_agent_input, user=user)):
+                pre_processed_input = await as_awaitable(agent.pre_process, input)
+                events = event_processor.process_event_stream(
+                    as_async_iterator(agent.run, pre_processed_input, user=user)
+                )
+                aiter(events)
+                post_processed_events = as_async_iterator(agent.post_process, events)
+                async for event in post_processed_events:
                     yield event
 
                 if callback is not None:
@@ -233,4 +239,4 @@ class AgentHandler(SetupTeardownMixin):
             finally:
                 span.end()
 
-        return fastsse.Response(event_stream(), encoder=self._sse_encoder)
+        return fastsse.Response(event_stream(run_agent_input), encoder=self._sse_encoder)

@@ -39,6 +39,12 @@ class Agent(abc.ABC, SetupTeardownMixin):
         """The quick prompts of the agent."""
         return []
 
+    def pre_process(self, input: ag_ui.core.RunAgentInput) -> ag_ui.core.RunAgentInput:
+        return input
+
+    def post_process(self, events: AsyncIterator[ag_ui.core.Event]) -> AsyncIterator[ag_ui.core.Event]:
+        return events
+
 
 class DefaultAgent(Agent):
     async def run(self, input: ag_ui.core.RunAgentInput, user: User) -> AsyncIterator[ag_ui.core.Event]:
