@@ -170,9 +170,9 @@ run_agent(client, "whoami", "Hello!")
 # We'll give a single agent two kinds of tool: an in-process Python function, and the tools of an
 # [MCP](https://modelcontextprotocol.io/) server.
 #
-# First, the in-process tool. `whoami` is a regular async function that takes
-# [`RunContext`][pydantic_ai.tools.RunContext]`[`[`User`][ravnar.authenticators.User]`]`
-# as its first parameter — ravnar injects the authenticated `User` as the dependency when the agent runs.
+# First, the in-process tool. `whoami` is a regular async function that takes the [pydantic_ai.tools.RunContext][].
+# ravnar injects the authenticated [ravnar.authenticators.User][] as the dependency when the agent runs so it is
+# available under `ctx.deps`.
 
 # %%
 from pydantic_ai import RunContext
