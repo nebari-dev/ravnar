@@ -22,6 +22,6 @@ repos:
         exclude: "^docs/tutorials/.*?\\.py$"
       - id: ruff-format
         files: "^docs/tutorials/.*?\\.py$"
-        args: [--line-length=79]
+        args: [--line-length=78]
       - id: ruff-check
         args: [--fix, --exit-non-zero-on-fix]

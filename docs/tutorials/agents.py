@@ -3,9 +3,9 @@
 #
 # This tutorial explains how to configure an agent in ravnar. You will see two approaches:
 #
-# 1. **Full control** — subclassing the [`Agent`][ravnar.agents.Agent] ABC directly.
+# 1. **Full control** — subclassing the [ravnar.agents.Agent][] ABC directly.
 # 2. **Using a wrapper** — adapting an existing [pydantic-ai](https://ai.pydantic.dev/) agent via
-#    [`PydanticAiAgentWrapper`][ravnar.agents.PydanticAiAgentWrapper], and giving it the tools of an
+#    [ravnar.agents.PydanticAiAgentWrapper][], and giving it the tools of an
 #    [MCP](https://modelcontextprotocol.io/) server.
 #
 # pydantic-ai is used throughout as the example, but ravnar is not tied to it: under the hood ravnar is an AG-UI
@@ -61,7 +61,9 @@ def run_agent(client, agent_id: str, message: str) -> None:
                 case "TOOL_CALL_RESULT":
                     print(f"  ✅ {event['content']}")
                 case "RUN_ERROR":
-                    print(f"  ❌ Error: {event.get('error', 'Unknown error')}")
+                    print(
+                        f"  ❌ Error: {event.get('error', 'Unknown error')}"
+                    )
 
         if text:
             print(f"\n{text}")
@@ -75,10 +77,10 @@ def run_agent(client, agent_id: str, message: str) -> None:
 # doesn't decide what those events are; it streams whatever the agent produces to the client over Server-Sent Events.
 # Every integration in this tutorial is ultimately just a different way of producing that event stream.
 #
-# The [`Agent`][ravnar.agents.Agent] abstract base class is the most direct way to produce it, giving you complete
-# control over the agent's behaviour. You implement a single method, [`run()`][ravnar.agents.Agent.run], which receives the incoming
+# The [ravnar.agents.Agent][] abstract base class is the most direct way to produce it, giving you complete
+# control over the agent's behaviour. You implement a single method, [ravnar.agents.Agent.run][], which receives the incoming
 # `RunAgentInput` (the AG-UI request — messages, thread and run IDs, and any client-supplied tools and state) and the
-# authenticated [`User`][ravnar.authenticators.User], and yields the `ag_ui.core.Event`s that make up the response.
+# authenticated [ravnar.authenticators.User][], and yields the `ag_ui.core.Event`s that make up the response.
 #
 # Let's build a simple agent that greets the current user. The sequence below — start the run, open a text message,
 # stream its content word by word, end the message, finish the run — is the canonical shape of an AG-UI text response.
@@ -142,7 +144,7 @@ agents = client.get("/api/agents").raise_for_status().json()
 print_json(agents)
 
 # %% [markdown]
-# The capabilities are derived from the default [`get_capabilities()`][ravnar.agents.Agent.get_capabilities] method of
+# The capabilities are derived from the default [ravnar.agents.Agent.get_capabilities][] method of
 # the base class which, among others, reports that the agent supports streaming. No tools are declared — this is a
 # purely conversational agent.
 #
@@ -155,7 +157,7 @@ run_agent(client, "whoami", "Hello!")
 # The `run_agent()` helper parsed the SSE event stream and printed only the text content. The agent reads the user
 # ID from the `User` object and includes it in the greeting.
 #
-# Subclassing [`Agent`][ravnar.agents.Agent] is the most flexible approach — you have full control over the event
+# Subclassing [ravnar.agents.Agent][] is the most flexible approach — you have full control over the event
 # stream and can integrate virtually any protocol or library. However, it also means you are responsible for producing
 # the right events at the right time.
 
@@ -163,8 +165,8 @@ run_agent(client, "whoami", "Hello!")
 # ## Using the Pydantic AI wrapper
 #
 # If you already use [pydantic-ai](https://ai.pydantic.dev/), you do not need to implement the
-# [`Agent`][ravnar.agents.Agent] interface yourself. ravnar ships with
-# [`PydanticAiAgentWrapper`][ravnar.agents.PydanticAiAgentWrapper], which adapts any `pydantic_ai.Agent` into a ravnar
+# [ravnar.agents.Agent][] interface yourself. ravnar ships with
+# [ravnar.agents.PydanticAiAgentWrapper][], which adapts any `pydantic_ai.Agent` into a ravnar
 # agent — handling AG-UI event generation, tool call streaming, and capability detection automatically.
 #
 # We'll give a single agent two kinds of tool: an in-process Python function, and the tools of an
@@ -259,7 +261,7 @@ client = Client(config)
 
 # %% [markdown]
 # The wrapper builds the capability object dynamically by introspecting the underlying pydantic-ai agent (via
-# [`extract_capabilities()`][ravnar.agents.PydanticAiAgentWrapper.extract_capabilities]), so both tools show up: the in-process `whoami`, and `greet`, whose definition — name,
+# [ravnar.agents.PydanticAiAgentWrapper.extract_capabilities][]), so both tools show up: the in-process `whoami`, and `greet`, whose definition — name,
 # description, and (empty) parameter schema — was discovered from the MCP server.
 
 # %%
@@ -300,9 +302,9 @@ run_agent(client, "assistant", "Hello!")
 # %% [markdown]
 # ## Other built-in agents
 #
-# pydantic-ai is just one option. ravnar also ships [`AgnoAgentWrapper`][ravnar.agents.AgnoAgentWrapper] for
-# [Agno](https://docs.agno.com/) agents and [`SSEAgent`][ravnar.agents.SSEAgent] to connect any agent that already
-# speaks AG-UI over HTTP. You can also implement the [`Agent`][ravnar.agents.Agent] ABC directly, as in the first
+# pydantic-ai is just one option. ravnar also ships [ravnar.agents.AgnoAgentWrapper][] for
+# [Agno](https://docs.agno.com/) agents and [ravnar.agents.SSEAgent][] to connect any agent that already
+# speaks AG-UI over HTTP. You can also implement the [ravnar.agents.Agent][] ABC directly, as in the first
 # section. See the [Python API reference](../../references/python_api/#ravnar.agents) for the full list of built-in
 # agents.
 
@@ -311,13 +313,13 @@ run_agent(client, "assistant", "Hello!")
 #
 # - ravnar is an AG-UI server: an agent is anything that produces a stream of AG-UI events, however you choose to
 #   build it.
-# - Subclass [`Agent`][ravnar.agents.Agent] directly when you need full control over the event stream or want to
+# - Subclass [ravnar.agents.Agent][] directly when you need full control over the event stream or want to
 #   integrate a custom protocol.
-# - Use [`PydanticAiAgentWrapper`][ravnar.agents.PydanticAiAgentWrapper] when you already have a pydantic-ai agent —
+# - Use [ravnar.agents.PydanticAiAgentWrapper][] when you already have a pydantic-ai agent —
 #   ravnar plugs it in automatically.
-# - ravnar injects the [`User`][ravnar.authenticators.User] object into the agent's `run()` method. For pydantic-ai
+# - ravnar injects the [ravnar.authenticators.User][] object into the agent's `run()` method. For pydantic-ai
 #   agents, it is available as `deps` in tools via
-#   [`RunContext`][pydantic_ai.tools.RunContext]`.deps`.
+#   [pydantic_ai.tools.RunContext][]`.deps`.
 # - Add [pydantic_ai.mcp.MCPToolset][] to a pydantic-ai agent's `toolsets` to expose the tools of
 #   any MCP server; the wrapper discovers and streams them automatically.
 # - All agents are registered through the same configuration mechanism, whether they are custom subclasses or wrappers.
