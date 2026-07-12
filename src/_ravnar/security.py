@@ -55,7 +55,7 @@ CSP = {
         (
             ["'unsafe-inline'", "https://cdn.jsdelivr.net"],
             ["'unsafe-inline'", "https://cdn.jsdelivr.net"],
-            ["'unsafe-inline'", "https://fastapi.tiangolo.com"],
+            ["https://fastapi.tiangolo.com"],
         ),
     ),
     "/redoc": make_csp(
@@ -66,7 +66,7 @@ CSP = {
         (
             ["'unsafe-inline'", "https://cdn.jsdelivr.net"],
             ["'unsafe-inline'", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com"],
-            ["'unsafe-inline'", "https://fastapi.tiangolo.com"],
+            ["https://fastapi.tiangolo.com"],
         ),
     ),
 }
