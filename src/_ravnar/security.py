@@ -32,6 +32,8 @@ class _ContentSecurityPolicySources:
     style: list[str] = dataclasses.field(default_factory=list)
     img: list[str] = dataclasses.field(default_factory=list)
     connect: list[str] = dataclasses.field(default_factory=list)
+    font: list[str] = dataclasses.field(default_factory=list)
+    worker: list[str] = dataclasses.field(default_factory=list)
 
     def merge(self, other: _ContentSecurityPolicySources) -> _ContentSecurityPolicySources:
         return _ContentSecurityPolicySources(
@@ -39,6 +41,8 @@ class _ContentSecurityPolicySources:
             style=[*self.style, *other.style],
             img=[*self.img, *other.img],
             connect=[*self.connect, *other.connect],
+            font=[*self.font, *other.font],
+            worker=[*self.worker, *other.worker],
         )
 
     def to_csp(self) -> str:
@@ -53,13 +57,15 @@ class _ContentSecurityPolicySources:
                     ("style-src", self.style),
                     ("img-src", self.img),
                     ("connect-src", self.connect),
+                    ("font-src", self.font),
+                    ("worker-src", self.worker),
                 ]
             ]
         )
 
 
 CONTENT_SECURITY_POLICY_SOURCES_DEFAULT = _ContentSecurityPolicySources(
-    script=["'self'"], style=["'self'"], img=["'self'", "data:"], connect=["'self'"]
+    script=["'self'"], style=["'self'"], img=["'self'", "data:"], connect=["'self'"], font=["'self'"], worker=["blob:"]
 )
 CONTENT_SECURITY_POLICY_DEFAULT = CONTENT_SECURITY_POLICY_SOURCES_DEFAULT.to_csp()
 CONTENT_SECURITY_POLICIES = {
@@ -73,13 +79,15 @@ CONTENT_SECURITY_POLICIES = {
         )
     ).to_csp(),
     # jsdelivr.net: ReDoc standalone bundle
-    # fonts.googleapis.com: Montserrat and Roboto fonts
+    # fonts.googleapis.com, fonts.gstatic.com: Montserrat and Roboto fonts
+    # cdn.redoc.ly: ReDoc logo
     # fastapi.tiangolo.com: favicon
     "/redoc": CONTENT_SECURITY_POLICY_SOURCES_DEFAULT.merge(
         _ContentSecurityPolicySources(
             script=["'unsafe-inline'", "https://cdn.jsdelivr.net"],
             style=["'unsafe-inline'", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com"],
-            img=["https://fastapi.tiangolo.com"],
+            img=["https://fastapi.tiangolo.com", "https://cdn.redoc.ly"],
+            font=["https://fonts.googleapis.com", "https://fonts.gstatic.com"],
         )
     ).to_csp(),
 }

@@ -132,4 +132,12 @@ class TestContentSecurityPolicyHeader:
     @pytest.mark.parametrize("csp", [CONTENT_SECURITY_POLICY_DEFAULT, *CONTENT_SECURITY_POLICIES.values()])
     def test_csp_format_is_valid(self, csp):
         srcs = dict(src.strip().split(" ", 1) for src in csp.split(";"))
-        assert set(srcs.keys()) == {"default-src", "script-src", "style-src", "img-src", "connect-src"}
+        assert set(srcs.keys()) == {
+            "default-src",
+            "script-src",
+            "style-src",
+            "img-src",
+            "connect-src",
+            "font-src",
+            "worker-src",
+        }
