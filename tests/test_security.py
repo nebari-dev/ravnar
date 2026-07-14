@@ -4,7 +4,7 @@ from fastapi import status
 from fastapi.responses import Response
 from starlette.testclient import TestClient
 
-from _ravnar.security import ALL_PERMISSIONS, DEFAULT_SECURITY_HEADERS, Permission, User, assert_permissions
+from _ravnar.security import ALL_PERMISSIONS, STATIC_SECURITY_HEADERS, Permission, User, assert_permissions
 
 
 class TestPermissionValidator:
@@ -71,7 +71,7 @@ class TestAssertPermissions:
         assert_permissions(user, "files:read")
 
 
-class TestSecurityHeaders:
+class TestStaticSecurityHeaders:
     @pytest.mark.parametrize(
         "endpoint,expected_status",
         [
@@ -85,7 +85,7 @@ class TestSecurityHeaders:
         response = app_client.get(endpoint)
         assert response.status_code == expected_status
 
-        for header_name, expected_value in DEFAULT_SECURITY_HEADERS.items():
+        for header_name, expected_value in STATIC_SECURITY_HEADERS.items():
             assert header_name in response.headers
             assert response.headers[header_name] == expected_value
 

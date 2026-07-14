@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import functools
 import getpass
+import itertools
 import os
 import re
 from collections.abc import Awaitable, Callable
@@ -29,17 +30,17 @@ CSPSources = tuple[list[str], list[str], list[str]]
 
 
 def make_csp(*sources: CSPSources) -> str:
-    script_src, style_src, img_src = zip(*sources, strict=True)
-    return ";".join(
+    script_srcs, style_srcs, img_srcs = (list(itertools.chain.from_iterable(s)) for s in zip(*sources, strict=True))
+    return "; ".join(
         [
-            " ".join([id, *s])
-            for id, s in [
+            " ".join([id, *srcs])
+            for id, srcs in [
                 # disallow everything, ...
-                ("default-src", "'none'"),
+                ("default-src", ["'none'"]),
                 # ... except for
-                ("script-src", script_src),
-                ("style-src", style_src),
-                ("img-src", img_src),
+                ("script-src", script_srcs),
+                ("style-src", style_srcs),
+                ("img-src", img_srcs),
             ]
         ]
     )
