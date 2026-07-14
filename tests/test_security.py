@@ -6,8 +6,8 @@ from starlette.testclient import TestClient
 
 from _ravnar.security import (
     ALL_PERMISSIONS,
-    CSP,
-    CSP_DEFAULT,
+    CONTENT_SECURITY_POLICIES,
+    CONTENT_SECURITY_POLICY_DEFAULT,
     STATIC_SECURITY_HEADERS,
     Permission,
     User,
@@ -111,9 +111,9 @@ class TestContentSecurityPolicyHeader:
     def test_default_csp(self, app_client: TestClient, endpoint):
         response = app_client.get(endpoint)
         assert "Content-Security-Policy" in response.headers
-        assert response.headers["Content-Security-Policy"] == CSP_DEFAULT
+        assert response.headers["Content-Security-Policy"] == CONTENT_SECURITY_POLICY_DEFAULT
 
-    @pytest.mark.parametrize(("endpoint", "csp"), list(CSP.items()))
+    @pytest.mark.parametrize(("endpoint", "csp"), list(CONTENT_SECURITY_POLICIES.items()))
     def test_custom_csp(self, app_client: TestClient, endpoint, csp):
         response = app_client.get(endpoint)
         assert "Content-Security-Policy" in response.headers
@@ -129,7 +129,7 @@ class TestContentSecurityPolicyHeader:
         response = app_client.get("/custom-csp")
         assert response.headers["Content-Security-Policy"] == value
 
-    @pytest.mark.parametrize("csp", [CSP_DEFAULT, *CSP.values()])
+    @pytest.mark.parametrize("csp", [CONTENT_SECURITY_POLICY_DEFAULT, *CONTENT_SECURITY_POLICIES.values()])
     def test_csp_format_is_valid(self, csp):
         srcs = dict(src.strip().split(" ", 1) for src in csp.split(";"))
-        assert set(srcs.keys()) == {"default-src", "script-src", "style-src", "img-src"}
+        assert set(srcs.keys()) == {"default-src", "script-src", "style-src", "img-src", "connect-src"}

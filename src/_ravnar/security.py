@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import functools
 import getpass
-import itertools
 import os
 import re
 from collections.abc import Awaitable, Callable
@@ -25,51 +25,63 @@ STATIC_SECURITY_HEADERS = {
     "X-Frame-Options": "DENY",
 }
 
-# script, style, img
-CSPSources = tuple[list[str], list[str], list[str]]
 
+@dataclasses.dataclass(kw_only=True)
+class _ContentSecurityPolicySources:
+    script: list[str] = dataclasses.field(default_factory=list)
+    style: list[str] = dataclasses.field(default_factory=list)
+    img: list[str] = dataclasses.field(default_factory=list)
+    connect: list[str] = dataclasses.field(default_factory=list)
 
-def make_csp(*sources: CSPSources) -> str:
-    script_srcs, style_srcs, img_srcs = (list(itertools.chain.from_iterable(s)) for s in zip(*sources, strict=True))
-    return "; ".join(
-        [
-            " ".join([id, *srcs])
-            for id, srcs in [
-                # disallow everything, ...
-                ("default-src", ["'none'"]),
-                # ... except for
-                ("script-src", script_srcs),
-                ("style-src", style_srcs),
-                ("img-src", img_srcs),
+    def merge(self, other: _ContentSecurityPolicySources) -> _ContentSecurityPolicySources:
+        return _ContentSecurityPolicySources(
+            script=[*self.script, *other.script],
+            style=[*self.style, *other.style],
+            img=[*self.img, *other.img],
+            connect=[*self.connect, *other.connect],
+        )
+
+    def to_csp(self) -> str:
+        return "; ".join(
+            [
+                " ".join([id, *srcs])
+                for id, srcs in [
+                    # disallow everything, ...
+                    ("default-src", ["'none'"]),
+                    # ... except for
+                    ("script-src", self.script),
+                    ("style-src", self.style),
+                    ("img-src", self.img),
+                    ("connect-src", self.connect),
+                ]
             ]
-        ]
-    )
+        )
 
 
-CSP_SOURCES_DEFAULT: CSPSources = (["'self'"], ["'self'"], ["'self'", "data:"])
-CSP_DEFAULT = make_csp(CSP_SOURCES_DEFAULT)
-CSP = {
-    "/docs": make_csp(
-        CSP_SOURCES_DEFAULT,
-        # jsdelivr.net: Swagger UI bundle and CSS
-        # fastapi.tiangolo.com: favicon
-        (
-            ["'unsafe-inline'", "https://cdn.jsdelivr.net"],
-            ["'unsafe-inline'", "https://cdn.jsdelivr.net"],
-            ["https://fastapi.tiangolo.com"],
-        ),
-    ),
-    "/redoc": make_csp(
-        CSP_SOURCES_DEFAULT,
-        # jsdelivr.net: ReDoc standalone bundle
-        # fonts.googleapis.com: Montserrat and Roboto fonts
-        # fastapi.tiangolo.com: favicon
-        (
-            ["'unsafe-inline'", "https://cdn.jsdelivr.net"],
-            ["'unsafe-inline'", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com"],
-            ["https://fastapi.tiangolo.com"],
-        ),
-    ),
+CONTENT_SECURITY_POLICY_SOURCES_DEFAULT = _ContentSecurityPolicySources(
+    script=["'self'"], style=["'self'"], img=["'self'", "data:"], connect=["'self'"]
+)
+CONTENT_SECURITY_POLICY_DEFAULT = CONTENT_SECURITY_POLICY_SOURCES_DEFAULT.to_csp()
+CONTENT_SECURITY_POLICIES = {
+    # jsdelivr.net: Swagger UI bundle and CSS
+    # fastapi.tiangolo.com: favicon
+    "/docs": CONTENT_SECURITY_POLICY_SOURCES_DEFAULT.merge(
+        _ContentSecurityPolicySources(
+            script=["'unsafe-inline'", "https://cdn.jsdelivr.net"],
+            style=["'unsafe-inline'", "https://cdn.jsdelivr.net"],
+            img=["https://fastapi.tiangolo.com"],
+        )
+    ).to_csp(),
+    # jsdelivr.net: ReDoc standalone bundle
+    # fonts.googleapis.com: Montserrat and Roboto fonts
+    # fastapi.tiangolo.com: favicon
+    "/redoc": CONTENT_SECURITY_POLICY_SOURCES_DEFAULT.merge(
+        _ContentSecurityPolicySources(
+            script=["'unsafe-inline'", "https://cdn.jsdelivr.net"],
+            style=["'unsafe-inline'", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com"],
+            img=["https://fastapi.tiangolo.com"],
+        )
+    ).to_csp(),
 }
 
 
@@ -80,7 +92,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         for key, value in STATIC_SECURITY_HEADERS.items():
             response.headers.setdefault(key, value)
 
-        response.headers.setdefault("Content-Security-Policy", CSP.get(request.url.path, CSP_DEFAULT))
+        response.headers.setdefault(
+            "Content-Security-Policy", CONTENT_SECURITY_POLICIES.get(request.url.path, CONTENT_SECURITY_POLICY_DEFAULT)
+        )
 
         return response
 
