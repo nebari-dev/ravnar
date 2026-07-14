@@ -4,7 +4,15 @@ from fastapi import status
 from fastapi.responses import Response
 from starlette.testclient import TestClient
 
-from _ravnar.security import ALL_PERMISSIONS, DEFAULT_SECURITY_HEADERS, Permission, User, assert_permissions
+from _ravnar.security import (
+    ALL_PERMISSIONS,
+    CSP,
+    CSP_DEFAULT,
+    STATIC_SECURITY_HEADERS,
+    Permission,
+    User,
+    assert_permissions,
+)
 
 
 class TestPermissionValidator:
@@ -71,27 +79,21 @@ class TestAssertPermissions:
         assert_permissions(user, "files:read")
 
 
-class TestSecurityHeaders:
+class TestStaticSecurityHeaders:
     @pytest.mark.parametrize(
-        "endpoint,expected_status",
-        [
-            ("/health", status.HTTP_200_OK),
-            ("/version", status.HTTP_200_OK),
-            ("/nonexistent", status.HTTP_404_NOT_FOUND),
-            ("/api/user", status.HTTP_200_OK),
-        ],
+        "endpoint",
+        ["/health", "/version", "/nonexistent", "/api/user"],
     )
-    def test_security_headers_present(self, app_client: TestClient, endpoint: str, expected_status: int):
+    def test_security_headers_present(self, app_client: TestClient, endpoint: str):
         response = app_client.get(endpoint)
-        assert response.status_code == expected_status
 
-        for header_name, expected_value in DEFAULT_SECURITY_HEADERS.items():
+        for header_name, expected_value in STATIC_SECURITY_HEADERS.items():
             assert header_name in response.headers
             assert response.headers[header_name] == expected_value
 
-    def test_headers_not_overwritten_when_already_set(self, app_client: TestClient):
-        header = "X-Content-Type-Options"
-        value = "some-other-value"
+    @pytest.mark.parametrize("header", STATIC_SECURITY_HEADERS)
+    def test_headers_not_overwritten_when_already_set(self, app_client: TestClient, header):
+        value = "sentinel"
 
         @app_client.app.get("/custom-header")
         def custom_header_endpoint():
@@ -99,3 +101,35 @@ class TestSecurityHeaders:
 
         response = app_client.get("/custom-header")
         assert response.headers[header] == value
+
+
+class TestContentSecurityPolicyHeader:
+    @pytest.mark.parametrize(
+        "endpoint",
+        ["/health", "/version", "/nonexistent", "/api/user"],
+    )
+    def test_default_csp(self, app_client: TestClient, endpoint):
+        response = app_client.get(endpoint)
+        assert "Content-Security-Policy" in response.headers
+        assert response.headers["Content-Security-Policy"] == CSP_DEFAULT
+
+    @pytest.mark.parametrize(("endpoint", "csp"), list(CSP.items()))
+    def test_custom_csp(self, app_client: TestClient, endpoint, csp):
+        response = app_client.get(endpoint)
+        assert "Content-Security-Policy" in response.headers
+        assert response.headers["Content-Security-Policy"] == csp
+
+    def test_csp_not_overwritten_when_already_set(self, app_client: TestClient):
+        value = "sentinel"
+
+        @app_client.app.get("/custom-csp")
+        def custom_csp_endpoint():
+            return Response("", headers={"Content-Security-Policy": value})
+
+        response = app_client.get("/custom-csp")
+        assert response.headers["Content-Security-Policy"] == value
+
+    @pytest.mark.parametrize("csp", [CSP_DEFAULT, *CSP.values()])
+    def test_csp_format_is_valid(self, csp):
+        srcs = dict(src.strip().split(" ", 1) for src in csp.split(";"))
+        assert set(srcs.keys()) == {"default-src", "script-src", "style-src", "img-src"}

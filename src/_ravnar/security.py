@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import functools
 import getpass
+import itertools
 import os
 import re
 from collections.abc import Awaitable, Callable
@@ -17,19 +18,70 @@ from _ravnar.utils import resolve_forward_references
 
 CallNext = Callable[[Request], Awaitable[Response]]
 
-
-DEFAULT_SECURITY_HEADERS = {
+STATIC_SECURITY_HEADERS = {
+    # Prevent MIME-type sniffing attacks (browsers won't guess Content-Type from file contents)
     "X-Content-Type-Options": "nosniff",
+    # Prevent clickjacking by disallowing the page from being embedded in frames/iframes
     "X-Frame-Options": "DENY",
-    "Content-Security-Policy": "default-src 'none'",
+}
+
+# script, style, img
+CSPSources = tuple[list[str], list[str], list[str]]
+
+
+def make_csp(*sources: CSPSources) -> str:
+    script_srcs, style_srcs, img_srcs = (list(itertools.chain.from_iterable(s)) for s in zip(*sources, strict=True))
+    return "; ".join(
+        [
+            " ".join([id, *srcs])
+            for id, srcs in [
+                # disallow everything, ...
+                ("default-src", ["'none'"]),
+                # ... except for
+                ("script-src", script_srcs),
+                ("style-src", style_srcs),
+                ("img-src", img_srcs),
+            ]
+        ]
+    )
+
+
+CSP_SOURCES_DEFAULT: CSPSources = (["'self'"], ["'self'"], ["'self'", "data:"])
+CSP_DEFAULT = make_csp(CSP_SOURCES_DEFAULT)
+CSP = {
+    "/docs": make_csp(
+        CSP_SOURCES_DEFAULT,
+        # jsdelivr.net: Swagger UI bundle and CSS
+        # fastapi.tiangolo.com: favicon
+        (
+            ["'unsafe-inline'", "https://cdn.jsdelivr.net"],
+            ["'unsafe-inline'", "https://cdn.jsdelivr.net"],
+            ["https://fastapi.tiangolo.com"],
+        ),
+    ),
+    "/redoc": make_csp(
+        CSP_SOURCES_DEFAULT,
+        # jsdelivr.net: ReDoc standalone bundle
+        # fonts.googleapis.com: Montserrat and Roboto fonts
+        # fastapi.tiangolo.com: favicon
+        (
+            ["'unsafe-inline'", "https://cdn.jsdelivr.net"],
+            ["'unsafe-inline'", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com"],
+            ["https://fastapi.tiangolo.com"],
+        ),
+    ),
 }
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: CallNext) -> Response:
         response: Response = await call_next(request)
-        for key, value in DEFAULT_SECURITY_HEADERS.items():
+
+        for key, value in STATIC_SECURITY_HEADERS.items():
             response.headers.setdefault(key, value)
+
+        response.headers.setdefault("Content-Security-Policy", CSP.get(request.url.path, CSP_DEFAULT))
+
         return response
 
 
@@ -99,7 +151,6 @@ def assert_permissions(user: User, *permissions: str) -> None:
 def make_authorized_user_factory(
     security_config: Any,
 ) -> Callable[..., Any]:
-
     authenticated_user: Callable[..., Awaitable[User]]
     if security_config.authenticator is None:
 
