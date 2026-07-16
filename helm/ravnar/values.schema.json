@@ -49,6 +49,16 @@
     "extraEnv": {
       "$ref": "#/$defs/envMap"
     },
+    "extraVolumes": {
+      "description": "Extra volumes for the main application pod, passed through tpl",
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "extraVolumeMounts": {
+      "description": "Extra volume mounts for the main application container, passed through tpl",
+      "type": "array",
+      "items": { "type": "object" }
+    },
     "service": {
       "$ref": "#/$defs/service"
     },

@@ -108,6 +108,9 @@ spec:
             - name: persistent-file-storage
               mountPath: /var/ravnar/files
             {{- end }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- tpl (toYaml .) $ | nindent 12 }}
+            {{- end }}
           ports:
             - containerPort: {{ .Values.service.targetPort }}
           startupProbe:
@@ -134,4 +137,7 @@ spec:
         - name: persistent-file-storage
           persistentVolumeClaim:
             claimName: {{ include "ravnar.component-name" (dict "top" . "component" "persistent-file-storage") }}
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- tpl (toYaml .) $ | nindent 8 }}
         {{- end }}

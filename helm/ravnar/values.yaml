@@ -60,6 +60,14 @@ config:
 # -- Extra environment variables for the application
 extraEnv: {}
 
+# -- Extra volumes for the main application pod, e.g. a ConfigMap holding a
+# private CA bundle to trust (pair with an extraVolumeMounts entry and an
+# SSL_CERT_FILE extraEnv). Values are passed through tpl.
+extraVolumes: []
+# -- Extra volume mounts for the main application container. Values are
+# passed through tpl.
+extraVolumeMounts: []
+
 service:
   # -- The type of service to create
   type: ClusterIP
