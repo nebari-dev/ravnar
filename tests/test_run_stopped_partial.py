@@ -10,8 +10,8 @@ partial assistant message is preserved on extract.
 """
 
 import ag_ui.core
-import pytest
 
+from _ravnar import orm
 from _ravnar.events import EventProcessor
 from _ravnar.utils import as_async_iterator
 
@@ -52,41 +52,35 @@ async def _process(processor: EventProcessor) -> None:
         pass
 
 
-@pytest.mark.asyncio
-async def test_stopped_run_keeps_partial_assistant_message():
-    from _ravnar import orm
-
-    processor = EventProcessor(run_agent_input=_run_input())
-    await _process(processor)
-
-    # The user stopped the run: keep the partial answer.
-    processor.mark_stopped()
-    run = processor.extract(include_input_message_ids=set())
-
-    contents = [
-        m.content for m in run.messages if isinstance(m, orm.AssistantMessage)
-    ]
-    assert any(c and PARTIAL.split()[0] in c for c in contents), (
-        "a stopped run must keep its partial answer so the interrupted response "
-        f"survives in history; got assistant contents={contents!r}"
-    )
+def _assistant_contents(run: orm.Run) -> list[str | None]:
+    return [m.content for m in run.messages if isinstance(m, orm.AssistantMessage)]
 
 
-@pytest.mark.asyncio
-async def test_unstopped_run_drops_unfinished_message():
-    from _ravnar import orm
+class TestEventProcessorStop:
+    async def test_stopped_run_keeps_partial_assistant_message(self):
+        processor = EventProcessor(run_agent_input=_run_input())
+        await _process(processor)
 
-    processor = EventProcessor(run_agent_input=_run_input())
-    await _process(processor)
+        # The user stopped the run: keep the partial answer.
+        processor.mark_stopped()
+        run = processor.extract(include_input_message_ids=set())
 
-    # Not stopped: the unfinished text message is dropped as before (no
-    # behavioral change for normal runs).
-    run = processor.extract(include_input_message_ids=set())
+        contents = _assistant_contents(run)
+        assert any(c and PARTIAL.split()[0] in c for c in contents), (
+            "a stopped run must keep its partial answer so the interrupted "
+            f"response survives in history; got assistant contents={contents!r}"
+        )
 
-    contents = [
-        m.content for m in run.messages if isinstance(m, orm.AssistantMessage)
-    ]
-    assert not any(c and PARTIAL.split()[0] in c for c in contents), (
-        "an unfinished (non-stopped) message must still be dropped; "
-        f"got assistant contents={contents!r}"
-    )
+    async def test_unstopped_run_drops_unfinished_message(self):
+        processor = EventProcessor(run_agent_input=_run_input())
+        await _process(processor)
+
+        # Not stopped: the unfinished text message is dropped as before (no
+        # behavioral change for normal runs).
+        run = processor.extract(include_input_message_ids=set())
+
+        contents = _assistant_contents(run)
+        assert not any(c and PARTIAL.split()[0] in c for c in contents), (
+            "an unfinished (non-stopped) message must still be dropped; "
+            f"got assistant contents={contents!r}"
+        )
