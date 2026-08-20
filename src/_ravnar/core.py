@@ -220,12 +220,24 @@ class AgentHandler(SetupTeardownMixin):
             span.set_attribute("parent_run_id", run_agent_input.parent_run_id)
 
         async def event_stream() -> AsyncIterator[ag_ui.core.Event]:
+            persisted = False
             try:
                 async for event in event_processor.process_event_stream(agent.run(run_agent_input, user=user)):
                     yield event
 
                 if callback is not None:
                     await callback(event_processor)
+                    persisted = True
+            except (asyncio.CancelledError, GeneratorExit):
+                # The client disconnected mid-run (e.g. the user stopped the
+                # response). Persist the partial turn so the prompt and the
+                # partial answer survive in history and feed the next turn --
+                # stopping ends a turn early, it does not erase it. Shield the
+                # write so the in-flight cancellation cannot abort it half-done.
+                if callback is not None and not persisted:
+                    event_processor.mark_stopped()
+                    await asyncio.shield(callback(event_processor))
+                raise
             except Exception as exc:
                 span.record_exception(exc)
                 span.set_status(trace.StatusCode.ERROR, description=str(exc))

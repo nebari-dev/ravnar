@@ -83,6 +83,10 @@ class EventProcessor:
         self._messages: dict[str, orm.Message] = {}
 
         self._progress = RunProgress.NOT_STARTED
+        # Set when the run is stopped by the user (client disconnect). A stopped
+        # run keeps its partial (unfinished) messages on extract so the
+        # interrupted answer survives in history.
+        self._stopped = False
         self._text_message_data: dict[str, TextMessageData] = {}
         self._tool_call_data: dict[str, ToolCallData] = {}
         self._tool_result_data: dict[str, ToolResultData] = {}
@@ -553,6 +557,14 @@ class EventProcessor:
         except jsonpatch.JsonPatchException:
             return None
 
+    def mark_stopped(self) -> None:
+        """Mark this run as stopped by the user (client disconnect).
+
+        A stopped run keeps its partial (unfinished) messages when extracted, so
+        the interrupted answer survives in history instead of being dropped.
+        """
+        self._stopped = True
+
     def extract(self, *, include_input_message_ids: Collection[str]) -> orm.Run:
         return orm.Run(
             id=self._run_agent_input.run_id,
@@ -590,7 +602,9 @@ class EventProcessor:
         assistant_messages: dict[str, orm.AssistantMessage] = {}
 
         for tmd in self._text_message_data.values():
-            if not tmd.finished:
+            # An unfinished text message is normally dropped, but a user-stopped
+            # run keeps its partial text so the interrupted answer is preserved.
+            if not tmd.finished and not self._stopped:
                 span = trace.get_current_span()
                 span.add_event(
                     "unfinished_text_message",
