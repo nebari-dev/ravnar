@@ -223,14 +223,13 @@ class AgentHandler(SetupTeardownMixin):
             try:
                 async for event in event_processor.process_event_stream(agent.run(run_agent_input, user=user)):
                     yield event
-
-                if callback is not None:
-                    await callback(event_processor)
             except Exception as exc:
                 span.record_exception(exc)
                 span.set_status(trace.StatusCode.ERROR, description=str(exc))
                 raise
             finally:
+                if callback is not None:
+                    await asyncio.shield(callback(event_processor))
                 span.end()
 
         return fastsse.Response(event_stream(), encoder=self._sse_encoder)

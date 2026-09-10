@@ -563,10 +563,11 @@ class EventProcessor:
         )
 
     def _extract_messages(self, include_input_message_ids: Collection[str]) -> list[orm.Message]:
+        span = trace.get_current_span()
+
         grouped_tool_calls: dict[str, list[ToolCallData]] = {}
         for tcd in self._tool_call_data.values():
             if not tcd.finished:
-                span = trace.get_current_span()
                 span.add_event(
                     "unfinished_tool_call",
                     attributes={
@@ -575,15 +576,6 @@ class EventProcessor:
                         "parent_message_id": tcd.parent_message_id,
                     },
                 )
-                self._logger.warn(
-                    "tool call",
-                    state="dropped",
-                    reason="unfinished",
-                    tool_call_id=tcd.tool_call_id,
-                    tool_call_name=tcd.tool_call_name,
-                    parent_message_id=tcd.parent_message_id,
-                )
-                continue
             grouped_tool_calls.setdefault(tcd.parent_message_id, []).append(tcd)
 
         # Build assistant messages so we have their UUIDs for tool call FKs
@@ -591,13 +583,10 @@ class EventProcessor:
 
         for tmd in self._text_message_data.values():
             if not tmd.finished:
-                span = trace.get_current_span()
                 span.add_event(
                     "unfinished_text_message",
                     attributes={"message_id": tmd.message_id},
                 )
-                self._logger.warn("text message", state="dropped", reason="unfinished", message_id=tmd.message_id)
-                continue
 
             assistant_messages[tmd.message_id] = orm.AssistantMessage(
                 uid=uuid.uuid4(),
@@ -651,13 +640,10 @@ class EventProcessor:
 
         for rd in self._reasoning_data.values():
             if not rd.finished:
-                span = trace.get_current_span()
                 span.add_event(
                     "unfinished_reasoning_message",
                     attributes={"message_id": rd.message_id},
                 )
-                self._logger.warn("reasoning message", state="dropped", reason="unfinished", message_id=rd.message_id)
-                continue
 
             messages.append(
                 orm.ReasoningMessage(
@@ -671,7 +657,6 @@ class EventProcessor:
 
         for trd in self._tool_result_data.values():
             if trd.tool_call_id not in tool_calls:
-                span = trace.get_current_span()
                 span.add_event(
                     "orphaned_tool_message",
                     attributes={"message_id": trd.message_id, "tool_call_id": trd.tool_call_id},

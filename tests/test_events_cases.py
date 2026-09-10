@@ -562,6 +562,124 @@ class EventProcessingCases:
             ),
         )
 
+    def case_unfinished_text_message(self, sentinels):
+        create_run_data = schema.CreateRunData(messages=[])
+
+        message_id = new_id()
+        deltas = ["Once upon ", "a time"]
+        timestamp = new_event_timestamp()
+
+        event_stream = [
+            ag_ui.core.TextMessageStartEvent(message_id=message_id, timestamp=timestamp),
+            *[ag_ui.core.TextMessageContentEvent(message_id=message_id, delta=d) for d in deltas],
+        ]
+
+        return EventProcessingCase(
+            create_run_data=create_run_data,
+            agent_event_stream=event_stream,
+            expected_event_stream=event_stream,
+            expected_run=orm.Run(
+                id=create_run_data.id,
+                thread_id=sentinels.new_id(),
+                parent_run_id=create_run_data.parent_run_id,
+                created_at=sentinels.new_datetime(),
+                messages=[
+                    orm.AssistantMessage(
+                        uid=sentinels.new_uuid(),
+                        run_id=create_run_data.id,
+                        id=message_id,
+                        created_at=parse_event_timestamp(timestamp),
+                        content="".join(deltas),
+                        tool_calls=[],
+                    )
+                ],
+            ),
+        )
+
+    def case_unfinished_reasoning_message(self, sentinels):
+        create_run_data = schema.CreateRunData(messages=[])
+
+        message_id = new_id()
+        deltas = ["reasoning ", "step"]
+        timestamp = new_event_timestamp()
+
+        event_stream = [
+            ag_ui.core.ReasoningStartEvent(message_id=message_id),
+            ag_ui.core.ReasoningMessageStartEvent(message_id=message_id, role="reasoning", timestamp=timestamp),
+            *[ag_ui.core.ReasoningMessageContentEvent(message_id=message_id, delta=d) for d in deltas],
+        ]
+
+        return EventProcessingCase(
+            create_run_data=create_run_data,
+            agent_event_stream=event_stream,
+            expected_event_stream=event_stream,
+            expected_run=orm.Run(
+                id=create_run_data.id,
+                thread_id=sentinels.new_id(),
+                parent_run_id=create_run_data.parent_run_id,
+                created_at=sentinels.new_datetime(),
+                messages=[
+                    orm.ReasoningMessage(
+                        uid=sentinels.new_uuid(),
+                        run_id=create_run_data.id,
+                        id=message_id,
+                        created_at=parse_event_timestamp(timestamp),
+                        content="".join(deltas),
+                    )
+                ],
+            ),
+        )
+
+    def case_unfinished_tool_call(self, sentinels):
+        create_run_data = schema.CreateRunData(messages=[])
+
+        tool_call_id = new_id()
+        tool_call_name = "test_tool"
+        args_deltas = ["{", '"arg": ']
+        timestamp = new_event_timestamp()
+
+        event_stream = [
+            ag_ui.core.ToolCallStartEvent(
+                tool_call_id=tool_call_id,
+                tool_call_name=tool_call_name,
+                parent_message_id=None,
+                timestamp=timestamp,
+            ),
+            *[ag_ui.core.ToolCallArgsEvent(tool_call_id=tool_call_id, delta=d) for d in args_deltas],
+        ]
+
+        assistant_message_uid = sentinels.new_uuid()
+        tool_call = orm.ToolCall(
+            uid=sentinels.new_uuid(),
+            id=tool_call_id,
+            name=tool_call_name,
+            arguments="".join(args_deltas),
+            assistant_message_uid=assistant_message_uid,
+            tool_message_uid=None,
+        )
+
+        return EventProcessingCase(
+            create_run_data=create_run_data,
+            agent_event_stream=event_stream,
+            expected_event_stream=event_stream,
+            expected_run=orm.Run(
+                id=create_run_data.id,
+                thread_id=sentinels.new_id(),
+                parent_run_id=create_run_data.parent_run_id,
+                created_at=sentinels.new_datetime(),
+                messages=[
+                    orm.AssistantMessage(
+                        uid=assistant_message_uid,
+                        run_id=create_run_data.id,
+                        id=sentinels.new_id(),
+                        created_at=parse_event_timestamp(timestamp),
+                        content=None,
+                        tool_calls=[tool_call],
+                    )
+                ],
+            ),
+        )
+
     def case_run_error(self, sentinels):
         create_run_data = schema.CreateRunData(messages=[])
 
