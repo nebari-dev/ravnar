@@ -46,7 +46,7 @@ serve = [
     "uvloop; sys_platform != 'win32'",
 ]
 pydantic-ai = [
-    "pydantic-ai-slim[ag-ui]>=1.87,<2",
+    "pydantic-ai-slim[ag-ui]>=2.40,<3",
 ]
 agno = [
     # FIXME: find the lowest version for AG-UI
@@ -75,6 +75,8 @@ lint = [
     "pre-commit>=4.2,<5",
 ]
 test = [
+    # Exercise opt-in compaction through the real Pydantic AI AG-UI adapter.
+    "pydantic-ai-harness==0.31.0",
     "compyre>=0.2.0",
     "coverage",
     "pytest>=9",
@@ -94,7 +96,8 @@ docs = [
     "mkdocs-material>=9.6.20",
     "mkdocstrings[python]>=1",
     # the agents tutorial builds a small MCP server with fastmcp; only needed to render the docs
-    "pydantic-ai-slim[fastmcp]>=1.87,<2",
+    "pydantic-ai-slim[mcp]>=2.40,<3",
+    "fastmcp>=3,<4",
     "pygments",
 ]
 dev = [
