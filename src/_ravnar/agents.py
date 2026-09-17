@@ -176,6 +176,7 @@ class PydanticAiAgentWrapper(Agent):
     ) -> ag_ui.core.AgentCapabilities:
         """Detect the agent's capabilities by introspecting the underlying pydantic-ai agent."""
         import pydantic_ai.models
+        from pydantic_ai.capabilities import AbstractCapability
         from pydantic_ai.usage import RunUsage
 
         capabilities = ag_ui.core.AgentCapabilities(
@@ -192,8 +193,6 @@ class PydanticAiAgentWrapper(Agent):
         )
 
         if ctx is None and isinstance(agent.model, pydantic_ai.models.Model):
-            from pydantic_ai.capabilities import AbstractCapability
-
             # Capability-owned toolsets in 2.x resolve their owner through the
             # context registry even when they contribute no tools. Register the
             # construction-time capabilities without running factories or hooks:

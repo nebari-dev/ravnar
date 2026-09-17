@@ -300,13 +300,7 @@ run_agent(client, "assistant", "Hello!")
 # ```
 
 # %% [markdown]
-# ## Pydantic AI 2.x compatibility and opt-in compaction
-#
-# The `pydantic-ai` extra supports Pydantic AI `>=2.40,<3`. Existing applications
-# pinned to 1.x must update those pins and migrate their agent definitions using
-# the [Pydantic AI v2 migration guide](https://ai.pydantic.dev/migration/).
-# Ravnar's wrapper still receives an agent and supplies the authenticated `User`
-# as its dependencies. This dependency update does not change Ravnar's database schema.
+# ## Opt-in compaction
 #
 # Compaction is optional. Installing or upgrading Ravnar does not add a compaction
 # capability, truncate history, discover deployment limits, or retry output exhaustion.

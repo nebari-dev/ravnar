@@ -19,7 +19,6 @@ jobs:
           - windows-latest
           - macos-latest
         python-version: ["3.11"]
-        pydantic-ai: ["locked"]
         include:
           - os: ubuntu-latest
             python-version: "3.12"
@@ -27,9 +26,6 @@ jobs:
             python-version: "3.13"
           - os: ubuntu-latest
             python-version: "3.14"
-          - os: ubuntu-latest
-            python-version: "3.11"
-            pydantic-ai: "2.40.0"
 
     runs-on: ${{ matrix.os }}
 
@@ -39,12 +35,6 @@ jobs:
 
       - name: Setup environment
         uses: ./.github/actions/setup-env
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install minimum supported Pydantic AI
-        if: matrix.pydantic-ai == '2.40.0'
-        run: uv pip install "pydantic-ai-slim[ag-ui]==2.40.0"
 
       - name: Run tests
         id: tests
@@ -52,5 +42,5 @@ jobs:
         env:
           COVERAGE_FILE: .coverage.${{ matrix.os }}.${{ matrix.python-version }}
         run: |
-          uv run --no-sync pytest --durations=25 \
+          uv run pytest --durations=25 \
             --cov=_ravnar --cov=ravnar --cov=./tests
