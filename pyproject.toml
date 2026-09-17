@@ -95,7 +95,7 @@ docs = [
     "mkdocstrings[python]>=1",
     # the agents tutorial builds a small MCP server with fastmcp; only needed to render the docs
     "pydantic-ai-slim[mcp]>=2,<3",
-    "fastmcp>=3,<4",
+    "fastmcp",
     "pygments",
 ]
 dev = [

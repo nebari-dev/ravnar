@@ -300,43 +300,6 @@ run_agent(client, "assistant", "Hello!")
 # ```
 
 # %% [markdown]
-# ## Opt-in compaction
-#
-# Compaction is optional. Installing or upgrading Ravnar does not add a compaction
-# capability, truncate history, discover deployment limits, or retry output exhaustion.
-# To use the maintained strategies from
-# [Pydantic AI Harness](https://github.com/pydantic/pydantic-ai-harness/tree/main/pydantic_ai_harness/compaction),
-# install Harness separately (`pip install pydantic-ai-harness==0.31.0`) and pass a
-# capability to your Pydantic AI agent:
-#
-# ```python
-# from pydantic_ai import Agent
-# from pydantic_ai_harness.compaction import ClearToolResults
-# from ravnar.agents import PydanticAiAgentWrapper
-#
-# agent = Agent(
-#     model,  # Your configured provider/model instance.
-#     capabilities=[ClearToolResults(max_fraction=0.8, keep_pairs=3)],
-# )
-# wrapper = PydanticAiAgentWrapper(agent)
-# ```
-#
-# The threshold above is an application choice, not a Ravnar default. Check the
-# selected deployment's effective context limit: Harness's registry may not recognize
-# a gateway alias or may describe a different limit. Configure `context_window` or
-# `fallback_context_window` on the capability as appropriate for that deployment.
-#
-# Ravnar persists the original streamed messages and tool results. Deterministic
-# history-editing capabilities such as `ClearToolResults` run again on the restored
-# history when a conversation continues; the saved transcript is not replaced by
-# the model-facing compacted copy. This does not add persistence for arbitrary
-# capability state or provider-native compaction artifacts. Applications using those
-# features must check their serialization requirements separately.
-#
-# For MCP integrations, the old `pydantic-ai-slim[fastmcp]` extra is now
-# `pydantic-ai-slim[mcp]`. Running the tutorial's local MCP server also requires
-# the full `fastmcp` package, not only the client extra.
-#
 # ## Other built-in agents
 #
 # pydantic-ai is just one option. ravnar also ships [ravnar.agents.AgnoAgentWrapper][] for

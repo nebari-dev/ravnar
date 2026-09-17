@@ -193,7 +193,7 @@ class PydanticAiAgentWrapper(Agent):
         )
 
         if ctx is None and isinstance(agent.model, pydantic_ai.models.Model):
-            # Capability-owned toolsets in 2.x resolve their owner through the
+            # Capability-owned toolsets resolve their owner through the
             # context registry even when they contribute no tools. Register the
             # construction-time capabilities without running factories or hooks:
             # metadata discovery is not an agent run and has no authenticated deps.
