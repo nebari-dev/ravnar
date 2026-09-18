@@ -27,7 +27,7 @@ jobs:
         run: uv build
 
       - name: Publish to PyPI
-        if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') }}
+        if: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.ref_type == 'tag' }}
         run: |
           uv publish --no-progress \
           --trusted-publishing=always \

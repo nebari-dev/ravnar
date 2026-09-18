@@ -68,7 +68,7 @@ jobs:
 
   build-and-push:
     needs: metadata
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
 
     steps:
@@ -147,7 +147,7 @@ jobs:
 
   fork-build-and-smoke-test:
     needs: metadata
-    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+    if: ${{ github.event.pull_request.head.repo.full_name != github.repository && github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -169,7 +169,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
-      # Load one platform per runner; no registry login, push, or cache writes.
       - name: Build local image
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
@@ -177,18 +176,17 @@ jobs:
           build-args: |
             VERSION=${{ needs.metadata.outputs.version }}
           platforms: ${{ matrix.platform }}
-          tags: ravnar:pr-smoke
+          tags: ravnar:fork-pr
           load: true
           push: false
 
       - name: Run smoke test
-        run: docker run --rm --pull=never --platform ${{ matrix.platform }} ravnar:pr-smoke --version
+        run: docker run --rm --pull=never --platform ${{ matrix.platform }} ravnar:fork-pr --version
 
   smoke-test:
     needs:
       - metadata
       - build-and-push
-    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
 
     strategy:
       fail-fast: false
