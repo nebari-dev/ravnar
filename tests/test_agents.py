@@ -128,13 +128,32 @@ class TestPydanticAiAgentWrapperCapabilityExtraction:
         assert capabilities.human_in_the_loop.approvals is True
 
     async def test_agent_with_factory_capabilities_skipped(self):
+        factory_calls = []
+
         def thinking_factory(ctx):
+            factory_calls.append(ctx)
             return pydantic_ai.capabilities.Thinking()
 
         agent = make_pydantic_ai_agent(capabilities=[thinking_factory])
         capabilities = await PydanticAiAgentWrapper.extract_capabilities(agent)
 
         assert capabilities.reasoning is None
+        assert factory_calls == []
+
+    async def test_agent_with_capability_owned_tools(self):
+        from pydantic_ai.capabilities import Toolset
+        from pydantic_ai.toolsets.function import FunctionToolset
+
+        def greet() -> str:
+            return "Hello"
+
+        agent = make_pydantic_ai_agent(capabilities=[Toolset(FunctionToolset(tools=[greet]))])
+        wrapper = PydanticAiAgentWrapper(agent)
+        await wrapper.setup()
+
+        tools = wrapper.get_capabilities().tools
+        assert tools is not None
+        assert [tool.name for tool in tools.items] == ["greet"]
 
     @pytest.mark.parametrize(
         "output_type,expected",

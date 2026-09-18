@@ -160,7 +160,7 @@ class PydanticAiAgentWrapper(Agent):
     def run(self, input: ag_ui.core.RunAgentInput, user: User) -> AsyncIterator[ag_ui.core.Event]:
         from pydantic_ai.ui.ag_ui import AGUIAdapter
 
-        return AGUIAdapter(agent=self._agent, run_input=input, accept="text/event-stream").run_stream(deps=user)  # type: ignore[return-value, arg-type]
+        return AGUIAdapter(agent=self._agent, run_input=input, accept="text/event-stream").run_stream(deps=user)  # type: ignore[return-value]
 
     def get_capabilities(self) -> ag_ui.core.AgentCapabilities:
         """The capabilities of the agent."""
@@ -176,6 +176,7 @@ class PydanticAiAgentWrapper(Agent):
     ) -> ag_ui.core.AgentCapabilities:
         """Detect the agent's capabilities by introspecting the underlying pydantic-ai agent."""
         import pydantic_ai.models
+        from pydantic_ai.capabilities import AbstractCapability
         from pydantic_ai.usage import RunUsage
 
         capabilities = ag_ui.core.AgentCapabilities(
@@ -192,7 +193,18 @@ class PydanticAiAgentWrapper(Agent):
         )
 
         if ctx is None and isinstance(agent.model, pydantic_ai.models.Model):
-            ctx = pydantic_ai.RunContext(deps=None, model=agent.model, usage=RunUsage())
+            # Capability-owned toolsets resolve their owner through the
+            # context registry even when they contribute no tools. Register the
+            # construction-time capabilities without running factories or hooks:
+            # metadata discovery is not an agent run and has no authenticated deps.
+            registered: list[AbstractCapability[Any]] = []
+            agent.root_capability.apply(registered.append)
+            ctx = pydantic_ai.RunContext(
+                deps=None,
+                model=agent.model,
+                usage=RunUsage(),
+                capabilities={cap.id or str(uuid.uuid4()): cap for cap in registered},
+            )
         if ctx is not None:
             dynamic_capabilities = await PydanticAiAgentWrapper._extract_dynamic_capabilities(agent, ctx=ctx)
 
