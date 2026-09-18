@@ -5,6 +5,9 @@ outputs:
   type:
     description: Workflow type. One of 'PR', 'main', or 'release'
     value: ${{ steps.workflow.outputs.type }}
+  fork-pr:
+    description: Whether the run is a pull request from a fork
+    value: ${{ steps.workflow.outputs.fork-pr }}
   version-raw:
     description: Raw version
     value: ${{ steps.versions.outputs.raw }}
@@ -51,6 +54,14 @@ runs:
         esac
 
         echo "type=${TYPE}" | tee --append "${GITHUB_OUTPUT}"
+
+        if [ "${TYPE}" = 'PR' ] && \
+           [ '${{ github.event.pull_request.head.repo.full_name }}' != '${{ github.repository }}' ]; then
+          FORK_PR=true
+        else
+          FORK_PR=false
+        fi
+        echo "fork-pr=${FORK_PR}" | tee --append "${GITHUB_OUTPUT}"
 
     - id: versions
       shell: bash

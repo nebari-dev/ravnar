@@ -20,6 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       workflow-type: ${{ steps.workflow.outputs.type }}
+      fork-pr: ${{ steps.workflow.outputs.fork-pr }}
       chart-version: ${{ steps.workflow.outputs.version-chart }}
       app-version: ${{ steps.workflow.outputs.version-latest }}
 
@@ -27,7 +28,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
       - name: Compute workflow metadata
@@ -36,6 +37,7 @@ jobs:
 
   build-and-push:
     needs: metadata
+    if: ${{ needs.metadata.outputs.fork-pr == 'false' }}
     runs-on: ubuntu-latest
 
     steps:
