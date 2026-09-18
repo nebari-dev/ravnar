@@ -6,7 +6,7 @@ outputs:
     description: Workflow type. One of 'PR', 'main', or 'release'
     value: ${{ steps.workflow.outputs.type }}
   fork-pr:
-    description: "'true' if the run is a pull request from a fork, 'false' otherwise"
+    description: Whether the run is a pull request from a fork
     value: ${{ steps.workflow.outputs.fork-pr }}
   version-raw:
     description: Raw version
@@ -55,8 +55,6 @@ runs:
 
         echo "type=${TYPE}" | tee --append "${GITHUB_OUTPUT}"
 
-        # Only a pull_request can be a fork PR, and 'github.event.pull_request' is absent
-        # for every other event, so gate on TYPE before touching that metadata.
         if [ "${TYPE}" = 'PR' ] && \
            [ '${{ github.event.pull_request.head.repo.full_name }}' != '${{ github.repository }}' ]; then
           FORK_PR=true
