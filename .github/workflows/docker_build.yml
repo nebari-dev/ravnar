@@ -27,6 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       workflow-type: ${{ steps.workflow.outputs.type }}
+      fork-pr: ${{ steps.workflow.outputs.fork-pr }}
       version: ${{ steps.workflow.outputs.version-raw }}
       tags: ${{ steps.image.outputs.tags }}
       tag: ${{ fromJson(steps.image.outputs.json).tags[0] }}
@@ -36,7 +37,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
       - name: Compute workflow metadata
@@ -68,7 +69,7 @@ jobs:
 
   build-and-push:
     needs: metadata
-    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ needs.metadata.outputs.fork-pr == 'false' }}
     runs-on: ubuntu-latest
 
     steps:
@@ -147,7 +148,7 @@ jobs:
 
   fork-build-and-smoke-test:
     needs: metadata
-    if: ${{ github.event.pull_request.head.repo.full_name != github.repository && github.event_name == 'pull_request' }}
+    if: ${{ needs.metadata.outputs.fork-pr == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read

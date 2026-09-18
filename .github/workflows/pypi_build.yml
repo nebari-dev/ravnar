@@ -17,18 +17,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
-      - name: Setup environment
-        uses: ./.github/actions/setup-env
+      - name: Compute workflow metadata
+        id: metadata
+        uses: ./.github/actions/workflow-metadata
 
       - name: Build binary and source distribution
         run: uv build
 
       - name: Publish to PyPI
-        if: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.ref_type == 'tag' }}
-        run: |
-          uv publish --no-progress \
-          --trusted-publishing=always \
-          dist/*
+        if: ${{ steps.metadata.outputs.type == 'release' }}
+        run: uv publish --no-progress --trusted-publishing=always dist/*
