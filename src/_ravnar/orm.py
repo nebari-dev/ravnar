@@ -180,7 +180,7 @@ class AssistantMessage(Message, kw_only=True, repr=False):
     __mapper_args__ = {"polymorphic_identity": "assistant"}
 
     role: Mapped[Literal["assistant"]] = mapped_column(types.String, default="assistant", use_existing_column=True)
-    content: Mapped[str | None] = mapped_column(use_existing_column=True)
+    content: Mapped[str | None] = mapped_column(use_existing_column=True, default=None)
     tool_calls: Mapped[list[ToolCall]] = relationship(
         "ToolCall",
         back_populates="assistant_message",
@@ -194,12 +194,13 @@ class UserMessage(Message, kw_only=True, repr=False):
     __mapper_args__ = {"polymorphic_identity": "user"}
 
     role: Mapped[Literal["user"]] = mapped_column(types.String, default="user", use_existing_column=True)
-    input_contents: Mapped[list[InputContent]] = relationship(
-        "InputContent",
-        back_populates="user_message",
+    input_contents: Mapped[list[MessageContent]] = relationship(
+        "MessageContent",
         cascade="all, delete-orphan",
-        order_by="InputContent.index",
+        order_by="MessageContent.index",
         lazy="selectin",
+        foreign_keys="MessageContent.message_uid",
+        default_factory=list,
     )
 
 
@@ -207,7 +208,7 @@ class ToolMessage(Message, kw_only=True, repr=False):
     __mapper_args__ = {"polymorphic_identity": "tool"}
 
     role: Mapped[Literal["tool"]] = mapped_column(types.String, default="tool", use_existing_column=True)
-    content: Mapped[str] = mapped_column(use_existing_column=True, nullable=True)
+    content: Mapped[str | None] = mapped_column(use_existing_column=True, nullable=True, default=None)
     tool_call: Mapped[ToolCall] = relationship(
         "ToolCall",
         back_populates="tool_message",
@@ -218,6 +219,14 @@ class ToolMessage(Message, kw_only=True, repr=False):
     )
     error: Mapped[str | None] = mapped_column(default=None)
     encrypted_value: Mapped[str | None] = mapped_column(default=None, use_existing_column=True)
+    result_contents: Mapped[list[MessageContent]] = relationship(
+        "MessageContent",
+        cascade="all, delete-orphan",
+        order_by="MessageContent.index",
+        lazy="selectin",
+        foreign_keys="MessageContent.message_uid",
+        default_factory=list,
+    )
 
 
 class ActivityMessage(Message, kw_only=True, repr=False):
@@ -235,18 +244,17 @@ class ReasoningMessage(Message, kw_only=True, repr=False):
     content: Mapped[str] = mapped_column(use_existing_column=True, nullable=True)
 
 
-class InputContent(Base, kw_only=True, repr=False):
-    __tablename__ = "input_contents"
+class MessageContent(Base, kw_only=True, repr=False):
+    """A single content part of a multimodal message (user input parts, tool result parts)."""
 
-    user_message_uid: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("messages.uid", ondelete="CASCADE"), primary_key=True
-    )
-    user_message: Mapped[UserMessage] = relationship("UserMessage", init=False, back_populates="input_contents")
+    __tablename__ = "message_contents"
+
+    message_uid: Mapped[uuid.UUID] = mapped_column(ForeignKey("messages.uid", ondelete="CASCADE"), primary_key=True)
     index: Mapped[int] = mapped_column(primary_key=True)
 
-    text: Mapped[str | None]
+    text: Mapped[str | None] = mapped_column(default=None)
 
-    file_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("files.id"), nullable=True, unique=True)
+    file_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("files.id"), nullable=True, unique=True, default=None)
     file: Mapped[File | None] = relationship("File", init=False, uselist=False, lazy="selectin")
 
 

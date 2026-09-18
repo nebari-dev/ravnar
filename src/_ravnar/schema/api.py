@@ -28,6 +28,7 @@ from datetime import datetime
 from typing import Annotated, Any, Self
 
 import ag_ui.core
+import sqlalchemy
 from pydantic import BeforeValidator, Field, model_validator
 
 from _ravnar import orm
@@ -77,9 +78,18 @@ class Thread(BaseModel):
     runs: list[Run]
 
 
+def _orm_message_metadata(v: Any) -> Any:
+    # ORM instances expose SQLAlchemy's registry through the `metadata` attribute;
+    # ravnar does not persist per-message metadata, so normalize it to None
+    if isinstance(v, sqlalchemy.MetaData):
+        return None
+    return v
+
+
 class AugmentedMessageMixin(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     created_at: datetime = Field(default_factory=now)
+    metadata: Annotated[dict[str, Any] | None, BeforeValidator(_orm_message_metadata)] = None
 
     @classmethod
     def _convert_orm_tool_call(cls, tool_call: orm.ToolCall) -> ag_ui.core.ToolCall:
@@ -104,7 +114,7 @@ class AugmentedAssistantMessage(AugmentedMessageMixin, ag_ui.core.AssistantMessa
     def _convert_orm(cls, obj: Any) -> Any:
         if isinstance(obj, orm.AssistantMessage) and obj.tool_calls:
             tool_calls = [cls._convert_orm_tool_call(tc) for tc in obj.tool_calls]
-            obj = {field: getattr(obj, field) for field in cls.model_fields if field not in {"tool_calls"}}
+            obj = {field: getattr(obj, field, None) for field in cls.model_fields if field not in {"tool_calls"}}
             obj["tool_calls"] = tool_calls
         return obj
 
@@ -113,7 +123,7 @@ def _str_to_text_input_content(v: Any) -> Any:
     if not isinstance(v, str):
         return v
 
-    return [ag_ui.core.TextInputContent(text=v)]
+    return [ag_ui.core.TextPart(text=v)]
 
 
 class AugmentedUserMessage(
@@ -131,18 +141,18 @@ class AugmentedUserMessage(
         if not isinstance(obj, orm.UserMessage):
             return obj
 
-        from _ravnar.file_storage import convert_file_to_input_content
+        from _ravnar.file_storage import convert_file_to_part
 
         content: list[ag_ui.core.InputContent] = []
         for ic in obj.input_contents:
             if ic.text is not None:
-                content.append(ag_ui.core.TextInputContent(text=ic.text))
+                content.append(ag_ui.core.TextPart(text=ic.text))
             elif ic.file is not None:
-                content.append(convert_file_to_input_content(ic.file))
+                content.append(convert_file_to_part(ic.file))
             else:
                 raise RuntimeError
 
-        obj = {field: getattr(obj, field) for field in cls.model_fields if field not in {"content"}}
+        obj = {field: getattr(obj, field, None) for field in cls.model_fields if field not in {"content"}}
         obj["content"] = content
 
         return obj
@@ -152,10 +162,28 @@ class AugmentedToolMessage(AugmentedMessageMixin, ag_ui.core.ToolMessage):
     @model_validator(mode="before")
     @classmethod
     def _convert_orm(cls, obj: Any) -> Any:
-        if isinstance(obj, orm.ToolMessage) and obj.tool_call is not None:
-            tool_call = cls._convert_orm_tool_call(obj.tool_call)
-            obj = {field: getattr(obj, field) for field in cls.model_fields if field not in {"tool_call_id"}}
-            obj["tool_call_id"] = tool_call.id
+        if not isinstance(obj, orm.ToolMessage):
+            return obj
+
+        overrides: dict[str, Any] = {}
+        if obj.tool_call is not None:
+            overrides["tool_call_id"] = cls._convert_orm_tool_call(obj.tool_call).id
+        if obj.result_contents:
+            from _ravnar.file_storage import convert_file_to_part
+
+            content: list[ag_ui.core.InputContent] = []
+            for rc in obj.result_contents:
+                if rc.text is not None:
+                    content.append(ag_ui.core.TextPart(text=rc.text))
+                elif rc.file is not None:
+                    content.append(convert_file_to_part(rc.file))
+                else:
+                    raise RuntimeError
+            overrides["content"] = content
+
+        if overrides:
+            obj = {field: getattr(obj, field, None) for field in cls.model_fields if field not in overrides}
+            obj.update(overrides)
         return obj
 
 

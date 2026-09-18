@@ -156,43 +156,74 @@ class EventProcessingCase:
 
 
 class EventProcessingCases:
-    def case_thinking_to_reasoning_conversion(self, sentinels):
+    def case_tool_result_text_parts(self, sentinels):
         create_run_data = schema.CreateRunData(messages=[])
 
-        message_id = sentinels.new_id()
-        deltas = ["thinking", "more"]
-
+        parent_message_id = new_id()
+        tool_call_id = new_id()
+        result_message_id = new_id()
         timestamp = new_event_timestamp()
+        parts = [ag_ui.core.TextPart(text="part one"), ag_ui.core.TextPart(text="part two")]
+
+        event_stream = [
+            ag_ui.core.TextMessageStartEvent(message_id=parent_message_id, timestamp=timestamp),
+            ag_ui.core.TextMessageEndEvent(message_id=parent_message_id),
+            ag_ui.core.ToolCallStartEvent(
+                tool_call_id=tool_call_id,
+                tool_call_name="test_tool",
+                parent_message_id=parent_message_id,
+                timestamp=timestamp,
+            ),
+            ag_ui.core.ToolCallEndEvent(tool_call_id=tool_call_id),
+            ag_ui.core.ToolCallResultEvent(
+                message_id=result_message_id,
+                tool_call_id=tool_call_id,
+                content=parts,
+                timestamp=timestamp,
+            ),
+        ]
+
+        assistant_message_uid = sentinels.new_uuid()
+        tool_message_uid = sentinels.new_uuid()
+        tool_call = orm.ToolCall(
+            uid=assistant_message_uid,
+            id=tool_call_id,
+            name="test_tool",
+            arguments="",
+            assistant_message_uid=assistant_message_uid,
+            tool_message_uid=tool_message_uid,
+        )
 
         return EventProcessingCase(
             create_run_data=create_run_data,
-            agent_event_stream=[
-                ag_ui.core.ThinkingStartEvent(),
-                ag_ui.core.ThinkingTextMessageStartEvent(timestamp=timestamp),
-                *[ag_ui.core.ThinkingTextMessageContentEvent(delta=d) for d in deltas],
-                ag_ui.core.ThinkingTextMessageEndEvent(),
-                ag_ui.core.ThinkingEndEvent(),
-            ],
-            expected_event_stream=[
-                ag_ui.core.ReasoningStartEvent(message_id=message_id),
-                ag_ui.core.ReasoningMessageStartEvent(message_id=message_id, role="reasoning", timestamp=timestamp),
-                *[ag_ui.core.ReasoningMessageContentEvent(message_id=message_id, delta=d) for d in deltas],
-                ag_ui.core.ReasoningMessageEndEvent(message_id=message_id),
-                ag_ui.core.ReasoningEndEvent(message_id=message_id),
-            ],
+            agent_event_stream=event_stream,
+            expected_event_stream=event_stream,
             expected_run=orm.Run(
                 id=create_run_data.id,
                 thread_id=sentinels.new_id(),
                 parent_run_id=create_run_data.parent_run_id,
                 created_at=sentinels.new_datetime(),
                 messages=[
-                    orm.ReasoningMessage(
-                        uid=sentinels.new_uuid(),
+                    orm.AssistantMessage(
+                        uid=assistant_message_uid,
                         run_id=create_run_data.id,
-                        id=message_id,
+                        id=parent_message_id,
                         created_at=parse_event_timestamp(timestamp),
-                        content="".join(deltas),
-                    )
+                        content=None,
+                        tool_calls=[tool_call],
+                    ),
+                    orm.ToolMessage(
+                        uid=tool_message_uid,
+                        run_id=create_run_data.id,
+                        id=result_message_id,
+                        content=None,
+                        created_at=parse_event_timestamp(timestamp),
+                        tool_call=tool_call,
+                        result_contents=[
+                            orm.MessageContent(message_uid=tool_message_uid, index=0, text="part one"),
+                            orm.MessageContent(message_uid=tool_message_uid, index=1, text="part two"),
+                        ],
+                    ),
                 ],
             ),
         )

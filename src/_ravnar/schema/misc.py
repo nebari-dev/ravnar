@@ -4,27 +4,20 @@ import functools
 from datetime import UTC, datetime
 from typing import Annotated, Any, Generic, Literal, Self, TypeVar, cast
 
+# See https://github.com/ag-ui-protocol/ag-ui/issues/2789 to avoid the private import
+import ag_ui._generated.models
 import fastsse
-from fastapi.routing import APIRoute
-from pydantic import AfterValidator, BeforeValidator, ConfigDict, Field, ValidationInfo, WithJsonSchema, field_validator
-from pydantic import BaseModel as _BaseModel
+from pydantic import AfterValidator, BeforeValidator, Field, ValidationInfo, WithJsonSchema, field_validator
 from pydantic.alias_generators import to_camel, to_snake
 from pydantic_core import PydanticUndefined
 
 
-class ExcludeNoneAPIRoute(APIRoute):
-    def __init__(self, *args: Any, **kwargs: Any):
-        kwargs["response_model_exclude_none"] = True
-        super().__init__(*args, **kwargs)
-
-
 class APIRouter(fastsse.APIRouter):
-    def __init__(self, *args: Any, route_class: type[APIRoute] = ExcludeNoneAPIRoute, **kwargs: Any) -> None:
-        super().__init__(*args, route_class=route_class, **kwargs)
+    pass
 
 
-class BaseModel(_BaseModel):
-    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+class BaseModel(ag_ui._generated.models.GeneratedBaseModel):
+    pass
 
 
 TModel = TypeVar("TModel", bound=BaseModel)
