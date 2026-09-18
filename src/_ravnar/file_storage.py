@@ -5,8 +5,8 @@ import dataclasses
 import mimetypes
 import urllib.parse
 import uuid
-from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Annotated, Any, Self
+from datetime import timedelta
+from typing import TYPE_CHECKING, Annotated, Any, cast
 
 import ag_ui.core
 import httpx
@@ -49,48 +49,27 @@ class _FileData:
     source_data: dict[str, Any] | None = None
 
 
-FileInputContent = Annotated[
-    ag_ui.core.ImageInputContent
-    | ag_ui.core.AudioInputContent
-    | ag_ui.core.VideoInputContent
-    | ag_ui.core.DocumentInputContent,
+FilePart = Annotated[
+    ag_ui.core.ImagePart | ag_ui.core.AudioPart | ag_ui.core.VideoPart | ag_ui.core.DocumentPart,
     pydantic.Field(discriminator="type"),
 ]
 
-MIME_TYPE = "application/vnd.ravnar.json-b64"
+RAVNAR_PROVIDER = "ravnar"
 
 
-class DataSourceValue(schema.BaseModel):
-    file_id: uuid.UUID
-    mime_type: str
-    source_type: str
-    source_data: dict[str, Any] | None
-    created_at: datetime
-
-    @classmethod
-    def decode(cls, s: str) -> Self:
-        return cls.model_validate_json(base64.b64decode(s))
-
-    def encode(self) -> str:
-        return base64.b64encode(self.model_dump_json(by_alias=True).encode()).decode()
-
-
-def convert_file_to_input_content(file: orm.File) -> FileInputContent:
-    return pydantic.TypeAdapter(ag_ui.core.InputContent).validate_python(
-        {
-            "type": file.type,
-            "source": ag_ui.core.InputContentDataSource(
-                value=DataSourceValue(
-                    file_id=file.id,
-                    mime_type=file.mime_type,
-                    source_type=file.source_type,
-                    source_data=file.source_data,
-                    created_at=file.created_at,
-                ).encode(),
-                mime_type=MIME_TYPE,
-            ),
-            "metadata": file.metadata_,
-        }
+def convert_file_to_part(file: orm.File) -> FilePart:
+    part_cls = {
+        "image": ag_ui.core.ImagePart,
+        "audio": ag_ui.core.AudioPart,
+        "video": ag_ui.core.VideoPart,
+        "document": ag_ui.core.DocumentPart,
+    }[file.type]
+    return cast(
+        "FilePart",
+        part_cls(
+            source=ag_ui.core.FileSource(value=str(file.id), provider=RAVNAR_PROVIDER, mime_type=file.mime_type),
+            metadata=file.metadata_,
+        ),
     )
 
 
@@ -106,8 +85,8 @@ class FileHandler:
         self._database = database
 
     @traced
-    async def add(self, file_input_content: FileInputContent, *, user_id: str) -> tuple[orm.File, bytes]:
-        source_type = file_input_content.source.type
+    async def add(self, file_part: FilePart, *, user_id: str) -> tuple[orm.File, bytes]:
+        source_type = file_part.source.type
         try:
             extractor = {
                 "data": self._extract_data,
@@ -118,12 +97,12 @@ class FileHandler:
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported file source type"
             ) from None
 
-        data = await extractor(file_input_content)
+        data = await extractor(file_part)
         file = orm.File(
             user_id=user_id,
-            type=file_input_content.type,
+            type=file_part.type,
             mime_type=data.mime_type,
-            metadata_=file_input_content.metadata,
+            metadata_=file_part.metadata,
             source_type=source_type,
             source_data=data.source_data,
         )
@@ -134,38 +113,34 @@ class FileHandler:
         return file, data.content
 
     @traced
-    async def add_or_read(self, file_input_content: FileInputContent, *, user_id: str) -> tuple[orm.File, bytes]:
-        if (
-            isinstance(file_input_content.source, ag_ui.core.InputContentDataSource)
-            and file_input_content.source.mime_type == MIME_TYPE
-        ):
-            value = DataSourceValue.decode(file_input_content.source.value)
-            file = await self.get(value.file_id, user_id=user_id)
+    async def add_or_read(self, file_part: FilePart, *, user_id: str) -> tuple[orm.File, bytes]:
+        if isinstance(file_part.source, ag_ui.core.FileSource) and file_part.source.provider == RAVNAR_PROVIDER:
+            file = await self.get(uuid.UUID(file_part.source.value), user_id=user_id)
             content = await self._storage.read(file.id)
         else:
-            file, content = await self.add(file_input_content, user_id=user_id)
+            file, content = await self.add(file_part, user_id=user_id)
 
         return file, content
 
     @staticmethod
-    async def _extract_data(file_input_content: FileInputContent) -> _FileData:
-        assert isinstance(file_input_content.source, ag_ui.core.InputContentDataSource)
+    async def _extract_data(file_part: FilePart) -> _FileData:
+        assert isinstance(file_part.source, ag_ui.core.DataSource)
 
         return _FileData(
-            content=await as_awaitable(base64.b64decode, file_input_content.source.value),
-            mime_type=file_input_content.source.mime_type,
+            content=await as_awaitable(base64.b64decode, file_part.source.value),
+            mime_type=file_part.source.mime_type,
         )
 
-    async def _extract_url(self, file_input_content: FileInputContent) -> _FileData:
-        assert isinstance(file_input_content.source, ag_ui.core.InputContentUrlSource)
+    async def _extract_url(self, file_part: FilePart) -> _FileData:
+        assert isinstance(file_part.source, ag_ui.core.UrlSource)
 
         if not self._config.url_data_source.enabled:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="URL file source is not enabled")
 
-        mime_type = file_input_content.source.mime_type
+        mime_type = file_part.source.mime_type
 
         response = await self._fetch_url(
-            file_input_content.source.value,
+            file_part.source.value,
             timeout=self._config.url_data_source.timeout,
             allowed_hostnames=self._config.url_data_source.allowed_hostnames,
         )

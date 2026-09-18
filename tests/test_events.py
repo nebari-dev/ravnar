@@ -12,6 +12,16 @@ from _ravnar.utils import as_async_iterator
 from . import test_events_cases
 
 
+class _NoopFileHandler:
+    """Stands in for FileHandler in unit cases that must not touch file storage."""
+
+    async def add(self, *args, **kwargs):
+        raise AssertionError("unexpected call to FileHandler.add")
+
+    async def get(self, *args, **kwargs):
+        raise AssertionError("unexpected call to FileHandler.get")
+
+
 class TestEventProcessor:
     def assert_equal(self, actual, expected):
         __tracebackhide__ = True
@@ -73,7 +83,9 @@ class TestEventProcessor:
 
         self.assert_equal(actual_event_stream, test_case.expected_event_stream)
 
-        actual_run = event_processor.extract(
-            include_input_message_ids={m.id for m in test_case.create_run_data.messages}
+        actual_run = await event_processor.extract(
+            file_handler=_NoopFileHandler(),
+            user_id="test-user",
+            include_input_message_ids={m.id for m in test_case.create_run_data.messages},
         )
         self.assert_equal(actual_run, test_case.expected_run)

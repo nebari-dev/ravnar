@@ -366,8 +366,8 @@ class AgnoAgentWrapper(_AgentBase):
             reasoning=ag_ui.core.ReasoningCapabilities(supported=agent.reasoning),
             multi_agent=ag_ui.core.MultiAgentCapabilities(
                 supported=True,
-                sub_agents=[
-                    ag_ui.core.SubAgentInfo(
+                subagents=[
+                    ag_ui.core.SubagentInfo(
                         name=agent.reasoning_agent.name,
                         description=agent.reasoning_agent.description,
                     )

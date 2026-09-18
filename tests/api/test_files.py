@@ -1,5 +1,6 @@
 import base64
 import mimetypes
+import uuid
 from urllib.parse import urlparse
 
 import ag_ui.core
@@ -9,7 +10,7 @@ import pytest
 import pytest_httpserver.httpserver
 
 from _ravnar.config import BaseConfig
-from _ravnar.file_storage import MIME_TYPE, DataSourceValue, FileInputContent
+from _ravnar.file_storage import RAVNAR_PROVIDER, FilePart
 
 
 class TestFiles:
@@ -20,26 +21,23 @@ class TestFiles:
 
         response = app_client.post(
             "/api/files",
-            json=ag_ui.core.ImageInputContent(
-                source=ag_ui.core.InputContentDataSource(value=base64.b64encode(content).decode(), mime_type=mime_type),
+            json=ag_ui.core.ImagePart(
+                source=ag_ui.core.DataSource(value=base64.b64encode(content).decode(), mime_type=mime_type),
                 metadata=metadata,
             ).model_dump(mode="json"),
         ).raise_for_status()
-        file_input_content = pydantic.TypeAdapter(FileInputContent).validate_json(response.content)
+        file_part = pydantic.TypeAdapter(FilePart).validate_json(response.content)
 
-        assert file_input_content.source.type == "data"
-        assert file_input_content.source.mime_type == MIME_TYPE
-        assert file_input_content.metadata == metadata
+        assert file_part.source.type == "file"
+        assert file_part.source.provider == RAVNAR_PROVIDER
+        assert file_part.source.mime_type == mime_type
+        assert file_part.metadata == metadata
 
-        value = DataSourceValue.decode(file_input_content.source.value)
-        assert value.source_type == "data"
-        assert value.mime_type == mime_type
+        file_id = uuid.UUID(file_part.source.value)
 
-        file_id = value.file_id
-
-        expected = file_input_content
+        expected = file_part
         response = app_client.get(f"/api/files/{file_id}").raise_for_status()
-        actual = pydantic.TypeAdapter(FileInputContent).validate_json(response.content)
+        actual = pydantic.TypeAdapter(FilePart).validate_json(response.content)
         compyre.assert_equal(actual, expected)
 
         response = app_client.get(f"/api/files/{file_id}/content").raise_for_status()
@@ -91,25 +89,22 @@ class TestFiles:
 
         response = url_app_client.post(
             "/api/files",
-            json=ag_ui.core.ImageInputContent(
-                source=ag_ui.core.InputContentUrlSource(value=url, mime_type=mime_type), metadata=metadata
+            json=ag_ui.core.ImagePart(
+                source=ag_ui.core.UrlSource(value=url, mime_type=mime_type), metadata=metadata
             ).model_dump(mode="json"),
         ).raise_for_status()
-        file_input_content = pydantic.TypeAdapter(FileInputContent).validate_json(response.content)
+        file_part = pydantic.TypeAdapter(FilePart).validate_json(response.content)
 
-        assert file_input_content.source.type == "data"
-        assert file_input_content.source.mime_type == MIME_TYPE
-        assert file_input_content.metadata == metadata
+        assert file_part.source.type == "file"
+        assert file_part.source.provider == RAVNAR_PROVIDER
+        assert file_part.source.mime_type == expected_mime_type
+        assert file_part.metadata == metadata
 
-        value = DataSourceValue.decode(file_input_content.source.value)
-        assert value.source_type == "url"
-        assert value.mime_type == expected_mime_type
+        file_id = uuid.UUID(file_part.source.value)
 
-        file_id = value.file_id
-
-        expected = file_input_content
+        expected = file_part
         response = url_app_client.get(f"/api/files/{file_id}").raise_for_status()
-        actual = pydantic.TypeAdapter(FileInputContent).validate_json(response.content)
+        actual = pydantic.TypeAdapter(FilePart).validate_json(response.content)
         compyre.assert_equal(actual, expected)
 
         response = url_app_client.get(f"/api/files/{file_id}/content").raise_for_status()

@@ -287,9 +287,9 @@ class TestAgnoAgentWrapperCapabilityExtraction:
 
         assert capabilities.multi_agent is not None
         assert capabilities.multi_agent.supported is True
-        assert capabilities.multi_agent.sub_agents is not None
-        assert len(capabilities.multi_agent.sub_agents) == 1
-        sub = capabilities.multi_agent.sub_agents[0]
+        assert capabilities.multi_agent.subagents is not None
+        assert len(capabilities.multi_agent.subagents) == 1
+        sub = capabilities.multi_agent.subagents[0]
         assert sub.name == "sub-reasoner"
         assert sub.description == "A sub-agent for reasoning"
 

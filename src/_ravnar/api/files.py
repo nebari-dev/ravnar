@@ -6,7 +6,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, Response
 
-from _ravnar.file_storage import FileHandler, FileInputContent, convert_file_to_input_content
+from _ravnar.file_storage import FileHandler, FilePart, convert_file_to_part
 from _ravnar.security import User
 
 
@@ -17,18 +17,18 @@ def make_router(*, file_handler: FileHandler, authorized_user_with: Callable[...
     async def upload_file(
         *,
         user: User = Depends(authorized_user_with("files:write")),  # noqa: B008
-        file_input_content: Annotated[FileInputContent, Body()],
-    ) -> FileInputContent:
+        file_input_content: Annotated[FilePart, Body()],
+    ) -> FilePart:
         file, _ = await file_handler.add(file_input_content, user_id=user.id)
-        return convert_file_to_input_content(file)
+        return convert_file_to_part(file)
 
     @router.get("/{id}")
     async def get_file(
         *,
         user: User = Depends(authorized_user_with("files:read")),  # noqa: B008
         id: uuid.UUID,
-    ) -> FileInputContent:
-        return convert_file_to_input_content(await file_handler.get(id, user_id=user.id))
+    ) -> FilePart:
+        return convert_file_to_part(await file_handler.get(id, user_id=user.id))
 
     @router.get("/{id}/content")
     async def read_file(

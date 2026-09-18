@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Annotated, Any
 import ag_ui.core
 import fastsse
 import pydantic
-from fastapi import Depends, HTTPException, Path, Query, status
+from fastapi import Depends, Path, Query
 from opentelemetry import trace
 
 from _ravnar import schema
@@ -138,7 +138,11 @@ def make_router(
         )
 
         async def callback(event_processor: EventProcessor) -> None:
-            run = event_processor.extract(include_input_message_ids={m.id for m in data.messages})
+            run = await event_processor.extract(
+                file_handler=file_handler,
+                user_id=user.id,
+                include_input_message_ids={m.id for m in data.messages},
+            )
             await database.create_run(run)
 
         return await agent_handler.run(thread.agent_id, run_agent_input, user=user, callback=callback)
@@ -152,24 +156,23 @@ def make_router(
     ) -> None:
         assert_permissions(user, "files:read", "files:write")
         for m in messages:
-            if not isinstance(m, schema.AugmentedUserMessage):
+            if isinstance(m, schema.AugmentedUserMessage):
+                parts: list[Any] = m.content
+            elif isinstance(m, schema.AugmentedToolMessage) and isinstance(m.content, list):
+                parts = m.content
+            else:
                 continue
 
-            for input_content in m.content:
-                if isinstance(input_content, ag_ui.core.TextInputContent):
+            for content_part in parts:
+                if isinstance(content_part, ag_ui.core.TextPart):
                     continue
-                if isinstance(input_content, ag_ui.core.BinaryInputContent):
-                    raise HTTPException(
-                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                        detail="Binary input content is not supported",
-                    )
 
-                file, content = await file_handler.add_or_read(input_content, user_id=user.id)
-                input_content.source = ag_ui.core.InputContentDataSource(
+                file, content = await file_handler.add_or_read(content_part, user_id=user.id)
+                content_part.source = ag_ui.core.DataSource(
                     value=await as_awaitable(lambda c: base64.b64encode(c).decode(), content),
                     mime_type=file.mime_type,
                 )
-                input_content.metadata = WrappedMetadata(raw=input_content.metadata, file_id=file.id)
+                content_part.metadata = WrappedMetadata(raw=content_part.metadata, file_id=file.id)
 
     @router.post("/{threadId}/rename")
     async def rename_thread(

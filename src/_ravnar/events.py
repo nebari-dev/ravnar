@@ -16,7 +16,7 @@ import structlog
 from opentelemetry import trace
 
 from _ravnar import schema
-from _ravnar.file_storage import WrappedMetadata
+from _ravnar.file_storage import FileHandler, FilePart, WrappedMetadata
 from _ravnar.observability import LazyValue
 
 from . import orm
@@ -25,6 +25,10 @@ from .utils import now
 tracer = trace.get_tracer(__name__)
 
 TEvent = TypeVar("TEvent", bound=ag_ui.core.Event)
+
+ToolResultPart = (
+    ag_ui.core.TextPart | ag_ui.core.ImagePart | ag_ui.core.AudioPart | ag_ui.core.VideoPart | ag_ui.core.DocumentPart
+)
 
 
 class RunProgress(enum.Enum):
@@ -63,7 +67,7 @@ class ToolResultData:
     created_at: datetime
     message_id: str
     tool_call_id: str
-    content: str
+    content: str | list[ToolResultPart]
 
 
 @dataclasses.dataclass
@@ -78,7 +82,7 @@ class EventProcessor:
     def __init__(self, *, run_agent_input: schema.AugmentedRunAgentInput):
         self._run_agent_input = run_agent_input
 
-        self._state = run_agent_input.state
+        self._state: Any = run_agent_input.state
         self._input_messages = self._convert_input_messages(run_agent_input.messages)
         self._messages: dict[str, orm.Message] = {}
 
@@ -87,7 +91,6 @@ class EventProcessor:
         self._tool_call_data: dict[str, ToolCallData] = {}
         self._tool_result_data: dict[str, ToolResultData] = {}
         self._reasoning_data: dict[str, ReasoningData] = {}
-        self._thinking_message_id: str | None = None
 
         self._logger = structlog.get_logger(
             thread_id=run_agent_input.thread_id,
@@ -121,21 +124,19 @@ class EventProcessor:
             match m:
                 case ag_ui.core.UserMessage():
                     assert not isinstance(m.content, str)
-                    input_contents: list[orm.InputContent] = []
+                    input_contents: list[orm.MessageContent] = []
                     for i, c in enumerate(m.content):
-                        assert not isinstance(c, ag_ui.core.BinaryInputContent)
                         text: str | None
                         file_id: uuid.UUID | None
-                        if isinstance(c, ag_ui.core.TextInputContent):
+                        if isinstance(c, ag_ui.core.TextPart):
                             text = c.text
                             file_id = None
                         else:
-                            assert isinstance(c.source, ag_ui.core.InputContentDataSource)
                             metadata = WrappedMetadata.model_validate(c.metadata)
                             text = None
                             file_id = metadata.file_id
                         input_contents.append(
-                            orm.InputContent(user_message_uid=message_uids[m.id], index=i, text=text, file_id=file_id)
+                            orm.MessageContent(message_uid=message_uids[m.id], index=i, text=text, file_id=file_id)
                         )
                     data = {**m.model_dump(exclude={"content"}), "input_contents": input_contents}
                 case ag_ui.core.AssistantMessage():
@@ -146,7 +147,27 @@ class EventProcessor:
                 case ag_ui.core.ToolMessage():
                     tool_call = tool_calls[m.tool_call_id]
                     tool_call.tool_message_uid = message_uids[m.id]
-                    data = {**m.model_dump(exclude={"tool_call_id"}), "tool_call": tool_call}
+                    if isinstance(m.content, list):
+                        result_contents: list[orm.MessageContent] = []
+                        for i, c in enumerate(m.content):
+                            if isinstance(c, ag_ui.core.TextPart):
+                                result_contents.append(
+                                    orm.MessageContent(message_uid=message_uids[m.id], index=i, text=c.text)
+                                )
+                            else:
+                                metadata = WrappedMetadata.model_validate(c.metadata)
+                                result_contents.append(
+                                    orm.MessageContent(
+                                        message_uid=message_uids[m.id], index=i, file_id=metadata.file_id
+                                    )
+                                )
+                        data = {
+                            **m.model_dump(exclude={"tool_call_id", "content"}),
+                            "tool_call": tool_call,
+                            "result_contents": result_contents,
+                        }
+                    else:
+                        data = {**m.model_dump(exclude={"tool_call_id"}), "tool_call": tool_call}
                 case _:
                     data = m.model_dump()
 
@@ -496,39 +517,6 @@ class EventProcessor:
                     return None
                 rd.finished = True
                 return self._trace_event(event)
-            case (
-                ag_ui.core.ThinkingStartEvent()
-                | ag_ui.core.ThinkingEndEvent()
-                | ag_ui.core.ThinkingTextMessageStartEvent()
-                | ag_ui.core.ThinkingTextMessageContentEvent()
-                | ag_ui.core.ThinkingTextMessageEndEvent()
-            ):
-                if isinstance(event, ag_ui.core.ThinkingStartEvent):
-                    # FIXME: check if not-None
-                    self._thinking_message_id = self._new_id()
-                else:
-                    # FIXME: check if None
-                    pass
-                message_id = self._thinking_message_id
-                if isinstance(event, ag_ui.core.ThinkingEndEvent):
-                    self._thinking_message_id = None
-
-                event_data = {
-                    "type": {
-                        ag_ui.core.EventType.THINKING_START: ag_ui.core.EventType.REASONING_START,
-                        ag_ui.core.EventType.THINKING_END: ag_ui.core.EventType.REASONING_END,
-                        ag_ui.core.EventType.THINKING_TEXT_MESSAGE_START: ag_ui.core.EventType.REASONING_MESSAGE_START,
-                        ag_ui.core.EventType.THINKING_TEXT_MESSAGE_CONTENT: ag_ui.core.EventType.REASONING_MESSAGE_CONTENT,
-                        ag_ui.core.EventType.THINKING_TEXT_MESSAGE_END: ag_ui.core.EventType.REASONING_MESSAGE_END,
-                    }[event.type],
-                    "message_id": message_id,
-                    **event.model_dump(exclude={"type"}),
-                }
-                if isinstance(event, ag_ui.core.ThinkingTextMessageStartEvent):
-                    event_data["role"] = "reasoning"
-                self._trace_event(event, state="replaced", reason="deprecated")
-                event = pydantic.TypeAdapter(ag_ui.core.Event).validate_python(event_data)
-                return self._process_event(event)
             case _:
                 return self._trace_event(
                     event,
@@ -547,22 +535,36 @@ class EventProcessor:
 
     @staticmethod
     def _apply_jsonpatch(document: dict[str, Any], patches: list[Any]) -> Any:
+        # ag_ui 1.x patch lists are typed pydantic operation models; jsonpatch wants plain dicts
+        normalized = [p.model_dump() if isinstance(p, pydantic.BaseModel) else p for p in patches]
         try:
             # this cannot be in-place as it will not roll back in case of an exception
-            return jsonpatch.JsonPatch(patches).apply(document, in_place=False)
+            return jsonpatch.JsonPatch(normalized).apply(document, in_place=False)
         except jsonpatch.JsonPatchException:
             return None
 
-    def extract(self, *, include_input_message_ids: Collection[str]) -> orm.Run:
+    async def extract(
+        self,
+        *,
+        file_handler: FileHandler,
+        user_id: str,
+        include_input_message_ids: Collection[str],
+    ) -> orm.Run:
         return orm.Run(
             id=self._run_agent_input.run_id,
             thread_id=self._run_agent_input.thread_id,
             parent_run_id=self._run_agent_input.parent_run_id,
             state=self._state,
-            messages=self._extract_messages(include_input_message_ids),
+            messages=await self._extract_messages(
+                file_handler=file_handler,
+                user_id=user_id,
+                include_input_message_ids=include_input_message_ids,
+            ),
         )
 
-    def _extract_messages(self, include_input_message_ids: Collection[str]) -> list[orm.Message]:
+    async def _extract_messages(
+        self, *, file_handler: FileHandler, user_id: str, include_input_message_ids: Collection[str]
+    ) -> list[orm.Message]:
         span = trace.get_current_span()
 
         grouped_tool_calls: dict[str, list[ToolCallData]] = {}
@@ -672,17 +674,71 @@ class EventProcessor:
             msg_uid = uuid.uuid4()
             tool_call = tool_calls[trd.tool_call_id]
             tool_call.tool_message_uid = msg_uid
+            content: str | None
+            result_contents: list[orm.MessageContent] = []
+            if isinstance(trd.content, str):
+                content = trd.content
+            else:
+                content = None
+                for i, part in enumerate(trd.content):
+                    if isinstance(part, ag_ui.core.TextPart):
+                        result_contents.append(orm.MessageContent(message_uid=msg_uid, index=i, text=part.text))
+                        continue
+                    file = await self._store_result_part(part, file_handler=file_handler, user_id=user_id)
+                    if file is not None:
+                        result_contents.append(orm.MessageContent(message_uid=msg_uid, index=i, file_id=file.id))
             messages.append(
                 orm.ToolMessage(
                     uid=msg_uid,
                     run_id=self._run_agent_input.run_id,
                     id=trd.message_id,
                     created_at=trd.created_at,
-                    content=trd.content,
+                    content=content,
                     tool_call=tool_call,
+                    result_contents=result_contents,
                     error=None,
                     encrypted_value=None,
                 )
             )
 
         return sorted(messages, key=lambda m: m.created_at)
+
+    async def _store_result_part(self, part: FilePart, *, file_handler: FileHandler, user_id: str) -> orm.File | None:
+        """Persist a non-text tool result part to file storage, returning None (with a trace) if it can't be stored."""
+        source = part.source
+        if isinstance(source, ag_ui.core.FileSource):
+            if source.provider != "ravnar":
+                self._trace_event_log(
+                    "tool result part",
+                    state="dropped",
+                    reason="foreign file handle",
+                    provider=source.provider,
+                    part_type=part.type,
+                )
+                return None
+            try:
+                return await file_handler.get(uuid.UUID(source.value), user_id=user_id)
+            except Exception as exc:
+                self._trace_event_log(
+                    "tool result part",
+                    state="dropped",
+                    reason=f"unresolvable ravnar file handle: {exc}",
+                    part_type=part.type,
+                )
+                return None
+        try:
+            file, _ = await file_handler.add(part, user_id=user_id)
+        except Exception as exc:
+            self._trace_event_log(
+                "tool result part",
+                state="dropped",
+                reason=f"failed to store file: {exc}",
+                part_type=part.type,
+                source_type=source.type,
+            )
+            return None
+        return file
+
+    def _trace_event_log(self, message: str, **attributes: Any) -> None:
+        trace.get_current_span().add_event(message, attributes={k: str(v) for k, v in attributes.items()})
+        self._logger.warn(message, **attributes)
