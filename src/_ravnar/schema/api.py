@@ -28,7 +28,8 @@ from datetime import datetime
 from typing import Annotated, Any, Self
 
 import ag_ui.core
-from pydantic import BeforeValidator, Field, model_validator
+import sqlalchemy
+from pydantic import BeforeValidator, Field, field_validator, model_validator
 
 from _ravnar import orm
 from _ravnar.agents import Agent
@@ -81,6 +82,14 @@ class AugmentedMessageMixin(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     created_at: datetime = Field(default_factory=now)
 
+    @field_validator("metadata", mode="before", check_fields=False)
+    @classmethod
+    def _convert_metadata(cls, value: Any) -> Any:
+        # ORM objects resolved from attributes expose the SQLAlchemy registry as ``metadata``, which is not a message field
+        if isinstance(value, sqlalchemy.MetaData):
+            return None
+        return value
+
     @classmethod
     def _convert_orm_tool_call(cls, tool_call: orm.ToolCall) -> ag_ui.core.ToolCall:
         return ag_ui.core.ToolCall(
@@ -104,7 +113,7 @@ class AugmentedAssistantMessage(AugmentedMessageMixin, ag_ui.core.AssistantMessa
     def _convert_orm(cls, obj: Any) -> Any:
         if isinstance(obj, orm.AssistantMessage) and obj.tool_calls:
             tool_calls = [cls._convert_orm_tool_call(tc) for tc in obj.tool_calls]
-            obj = {field: getattr(obj, field) for field in cls.model_fields if field not in {"tool_calls"}}
+            obj = {field: getattr(obj, field, None) for field in cls.model_fields if field not in {"tool_calls"}}
             obj["tool_calls"] = tool_calls
         return obj
 
@@ -142,7 +151,7 @@ class AugmentedUserMessage(
             else:
                 raise RuntimeError
 
-        obj = {field: getattr(obj, field) for field in cls.model_fields if field not in {"content"}}
+        obj = {field: getattr(obj, field, None) for field in cls.model_fields if field not in {"content"}}
         obj["content"] = content
 
         return obj
@@ -154,7 +163,7 @@ class AugmentedToolMessage(AugmentedMessageMixin, ag_ui.core.ToolMessage):
     def _convert_orm(cls, obj: Any) -> Any:
         if isinstance(obj, orm.ToolMessage) and obj.tool_call is not None:
             tool_call = cls._convert_orm_tool_call(obj.tool_call)
-            obj = {field: getattr(obj, field) for field in cls.model_fields if field not in {"tool_call_id"}}
+            obj = {field: getattr(obj, field, None) for field in cls.model_fields if field not in {"tool_call_id"}}
             obj["tool_call_id"] = tool_call.id
         return obj
 

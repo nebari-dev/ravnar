@@ -87,7 +87,6 @@ class EventProcessor:
         self._tool_call_data: dict[str, ToolCallData] = {}
         self._tool_result_data: dict[str, ToolResultData] = {}
         self._reasoning_data: dict[str, ReasoningData] = {}
-        self._thinking_message_id: str | None = None
 
         self._logger = structlog.get_logger(
             thread_id=run_agent_input.thread_id,
@@ -116,8 +115,12 @@ class EventProcessor:
         converted_messages: dict[str, orm.Message] = {}
         for m in messages:
             cls = orm.Message.__mapper__.polymorphic_map[m.role].class_
+            init_fields = {f.name for f in dataclasses.fields(cls) if f.init}
 
-            data: dict[str, Any]
+            # AG-UI 1.0 model_dump() omits unset fields, so merge it into the ORM constructor kwargs keeping only
+            # attributes the ORM model accepts; required attributes missing from the dump are defaulted below
+            data: dict[str, Any] = {key: value for key, value in m.model_dump().items() if key in init_fields}
+
             match m:
                 case ag_ui.core.UserMessage():
                     assert not isinstance(m.content, str)
@@ -137,18 +140,26 @@ class EventProcessor:
                         input_contents.append(
                             orm.InputContent(user_message_uid=message_uids[m.id], index=i, text=text, file_id=file_id)
                         )
-                    data = {**m.model_dump(exclude={"content"}), "input_contents": input_contents}
+                    data["content"] = None
+                    data["input_contents"] = input_contents
                 case ag_ui.core.AssistantMessage():
-                    data = {
-                        **m.model_dump(exclude={"tool_calls"}),
-                        "tool_calls": [tool_calls[tc.id] for tc in m.tool_calls or []],
-                    }
+                    data["tool_calls"] = [tool_calls[tc.id] for tc in m.tool_calls or []]
                 case ag_ui.core.ToolMessage():
+                    # TODO: support multi-part tool message content (str | list[ContentPart]) per AG-UI 1.0
+                    assert isinstance(m.content, str)
                     tool_call = tool_calls[m.tool_call_id]
                     tool_call.tool_message_uid = message_uids[m.id]
-                    data = {**m.model_dump(exclude={"tool_call_id"}), "tool_call": tool_call}
-                case _:
-                    data = m.model_dump()
+                    data["tool_call"] = tool_call
+
+            # default required keyword-only ORM attributes that the dump omitted (unset/None in the protocol model)
+            for field in dataclasses.fields(cls):
+                if (
+                    field.init
+                    and field.name not in data
+                    and field.default is dataclasses.MISSING
+                    and field.default_factory is dataclasses.MISSING
+                ):
+                    data[field.name] = None
 
             data["uid"] = message_uids[m.id]
             # setting the run ID to the current run here avoids the need to set it later in case the message is either
@@ -357,6 +368,8 @@ class EventProcessor:
                 tcd.finished = True
                 return self._trace_event(event)
             case ag_ui.core.ToolCallResultEvent():
+                # TODO: support multi-part tool result content (str | list[ContentPart]) per AG-UI 1.0
+                assert isinstance(event.content, str)
                 overridden = event.message_id in self._tool_result_data
                 self._tool_result_data[event.message_id] = ToolResultData(
                     created_at=parse_timestamp(event.timestamp),
@@ -496,39 +509,6 @@ class EventProcessor:
                     return None
                 rd.finished = True
                 return self._trace_event(event)
-            case (
-                ag_ui.core.ThinkingStartEvent()
-                | ag_ui.core.ThinkingEndEvent()
-                | ag_ui.core.ThinkingTextMessageStartEvent()
-                | ag_ui.core.ThinkingTextMessageContentEvent()
-                | ag_ui.core.ThinkingTextMessageEndEvent()
-            ):
-                if isinstance(event, ag_ui.core.ThinkingStartEvent):
-                    # FIXME: check if not-None
-                    self._thinking_message_id = self._new_id()
-                else:
-                    # FIXME: check if None
-                    pass
-                message_id = self._thinking_message_id
-                if isinstance(event, ag_ui.core.ThinkingEndEvent):
-                    self._thinking_message_id = None
-
-                event_data = {
-                    "type": {
-                        ag_ui.core.EventType.THINKING_START: ag_ui.core.EventType.REASONING_START,
-                        ag_ui.core.EventType.THINKING_END: ag_ui.core.EventType.REASONING_END,
-                        ag_ui.core.EventType.THINKING_TEXT_MESSAGE_START: ag_ui.core.EventType.REASONING_MESSAGE_START,
-                        ag_ui.core.EventType.THINKING_TEXT_MESSAGE_CONTENT: ag_ui.core.EventType.REASONING_MESSAGE_CONTENT,
-                        ag_ui.core.EventType.THINKING_TEXT_MESSAGE_END: ag_ui.core.EventType.REASONING_MESSAGE_END,
-                    }[event.type],
-                    "message_id": message_id,
-                    **event.model_dump(exclude={"type"}),
-                }
-                if isinstance(event, ag_ui.core.ThinkingTextMessageStartEvent):
-                    event_data["role"] = "reasoning"
-                self._trace_event(event, state="replaced", reason="deprecated")
-                event = pydantic.TypeAdapter(ag_ui.core.Event).validate_python(event_data)
-                return self._process_event(event)
             case _:
                 return self._trace_event(
                     event,
@@ -546,10 +526,12 @@ class EventProcessor:
         return cast(TEvent, event.model_copy(update={"raw_event": event, **replace}))
 
     @staticmethod
-    def _apply_jsonpatch(document: dict[str, Any], patches: list[Any]) -> Any:
+    def _apply_jsonpatch(document: Any, patches: list[Any]) -> Any:
+        # since AG-UI 1.0 the patch entries are typed operation models rather than dicts
+        operations = [p.model_dump(by_alias=True) if isinstance(p, pydantic.BaseModel) else p for p in patches]
         try:
             # this cannot be in-place as it will not roll back in case of an exception
-            return jsonpatch.JsonPatch(patches).apply(document, in_place=False)
+            return jsonpatch.JsonPatch(operations).apply(document, in_place=False)
         except jsonpatch.JsonPatchException:
             return None
 
